@@ -30,6 +30,9 @@ LA_BOUNDS = (-118.95, 33.70, -117.64, 34.83)
 
 NATIVE_CELL_M = 30.0   # resolution of both source maps
 METRES_PER_DEG = 111_320.0
+NLCD_WATER = 11
+# Cells at least this much water become water, so rivers narrower than a cell still stop fire.
+WATER_BREAK = 0.3
 
 Bounds = tuple[float, float, float, float]
 
@@ -81,7 +84,7 @@ def _load(bounds: Bounds, max_cells: int) -> FireMaps:
     cols, rows = max(1, round(width_m / cell)), max(1, round(height_m / cell))
     cell_size = (width_m / cols + height_m / rows) / 2
 
-    cache_file = CACHE_DIR / f"fire_{west}_{south}_{east}_{north}_{max_cells}.npz"
+    cache_file = CACHE_DIR / f"fire2_{west}_{south}_{east}_{north}_{max_cells}.npz"
     if cache_file.is_file():
         with np.load(cache_file) as cached:
             return FireMaps(bounds, cell_size, cached["elevation"], cached["land_cover"])
@@ -90,6 +93,9 @@ def _load(bounds: Bounds, max_cells: int) -> FireMaps:
     # Averaging smooths elevation; land cover keeps the most common class per cell.
     elevation = _resample(DEM_PATH, transform, (rows, cols), np.float32, Resampling.average)
     land_cover = _resample(LAND_COVER_PATH, transform, (rows, cols), np.uint8, Resampling.mode)
+    water = _resample(LAND_COVER_PATH, transform, (rows, cols), np.float32, Resampling.average,
+                      values=lambda lc: (lc == NLCD_WATER).astype(np.float32))
+    land_cover[water >= WATER_BREAK] = NLCD_WATER
     elevation[~np.isfinite(elevation)] = 0.0  # gaps in the DEM are offshore
 
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -97,16 +103,23 @@ def _load(bounds: Bounds, max_cells: int) -> FireMaps:
     return FireMaps(bounds, cell_size, elevation, land_cover)
 
 
-def _resample(path: Path, transform, shape: tuple[int, int], dtype, method: Resampling) -> np.ndarray:
+def _resample(path: Path, transform, shape: tuple[int, int], dtype, method: Resampling,
+              values=None) -> np.ndarray:
+    """Resample band 1 of `path` onto the grid, after mapping it through `values` if given."""
     if not path.is_file():
         raise FileNotFoundError(f"Missing map {path}")
     fill = np.nan if dtype == np.float32 else 0
     out = np.full(shape, fill, dtype=dtype)
     with rasterio.open(path) as src:
+        source, src_nodata = rasterio.band(src, 1), src.nodata
+        if values is not None:
+            source, src_nodata = values(src.read(1)), None
         reproject(
-            source=rasterio.band(src, 1),
+            source=source,
             destination=out,
-            src_nodata=src.nodata,
+            src_nodata=src_nodata,
+            src_transform=src.transform,
+            src_crs=src.crs,
             dst_transform=transform,
             dst_crs="EPSG:4326",
             dst_nodata=fill,

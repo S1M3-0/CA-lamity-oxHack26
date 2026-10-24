@@ -298,34 +298,22 @@ export function Simulator() {
           {meta.originLabel && (
             <div className="flex items-center justify-between gap-2 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm">
               <span className="flex items-center gap-2">
-                <Icon name="target" className={`size-4 ${hazard === "flood" ? "text-sky-400" : "text-orange-400"}`} />
+                <Icon name="target" className="size-4 text-orange-400" />
                 <span>
                   <span className="flex items-center gap-2 font-medium">
                     {meta.originLabel}
                     <InfoTip label={meta.originLabel}>
-                      {hazard === "wildfire" ? (
-                        <>
-                          <span>
-                            Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
-                            the fire starts</b>, and it spreads outward from there.
-                          </span>
-                          <span>Click somewhere else to move it, or press × to clear it.</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>
-                            Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
-                            the river bursts its banks</b>, and the extra water pours out from there on top of the rain.
-                          </span>
-                          <span>Heavier rain means more water. Click somewhere else to move it, or press × to clear it.</span>
-                        </>
-                      )}
+                      <span>
+                        Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
+                        the fire starts</b>, and it spreads outward from there.
+                      </span>
+                      <span>Click somewhere else to move it, or press × to clear it.</span>
                     </InfoTip>
                   </span>
                   <span className={`block text-xs ${origin ? "text-zinc-500" : "text-amber-400"}`}>
                     {origin
                       ? `Starts at ${origin[1].toFixed(4)}, ${origin[0].toFixed(4)}`
-                      : `Required · click the map where the ${hazard === "wildfire" ? "fire" : "breach"} starts`}
+                      : "Required · click the map where the fire starts"}
                   </span>
                 </span>
               </span>

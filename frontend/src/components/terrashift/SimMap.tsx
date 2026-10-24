@@ -189,12 +189,9 @@ export function SimMap(props: Props) {
     if (!map || !lib) return;
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-    const { origin, hazard } = propsRef.current;
+    const { origin } = propsRef.current;
     if (origin) {
-      const cls =
-        hazard === "flood"
-          ? "size-4 rounded-full border-2 border-white bg-sky-500 shadow-lg"
-          : "size-4 rounded-full border-2 border-white bg-orange-500 shadow-lg";
+      const cls = "size-4 rounded-full border-2 border-white bg-orange-500 shadow-lg";
       markersRef.current.push(new lib.Marker({ element: markerEl(cls) }).setLngLat(origin).addTo(map));
     }
   }

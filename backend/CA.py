@@ -116,9 +116,13 @@ def _spread_probabilities(fuel: np.ndarray, elevation: np.ndarray | None, cell_s
     fixed for a run, so this is worked out once.
     """
     base = P0 * fuel * _humidity_factor(humidity)
+    burnable = fuel > 0
     probs = []
     for dr, dc in NEIGHBOURS:
         p = base * _wind_factor(wind_speed, wind_direction, dr, dc)
+        if dr and dc:
+            # No slipping diagonally between two unburnable cells (a river or road at 45°).
+            p = p * (_shift(burnable, dr, 0) | _shift(burnable, 0, dc))
         if elevation is not None:
             rise = elevation - _shift(elevation, dr, dc)
             slope_deg = np.degrees(np.arctan(rise / (cell_size * math.hypot(dr, dc))))

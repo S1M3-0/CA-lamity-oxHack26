@@ -88,6 +88,8 @@ export function simulateWildfire(t: Terrain, p: Params, origin: number, seed: nu
           if (i < 0 || j < 0 || i >= w || j >= h) continue;
           const n = j * w + i;
           if (state[n] !== 0 || fuel[n] <= 0) continue;
+          // no slipping diagonally between two unburnable cells (a river or road running at 45°)
+          if (DIRS8[d][0] && DIRS8[d][1] && fuel[cj * w + i] <= 0 && fuel[j * w + ci] <= 0) continue;
           const slopeDeg = (Math.atan((elev[n] - elev[c]) / (dist[d] * cellM)) * 180) / Math.PI;
           const ps = Math.min(4, Math.exp(0.078 * slopeDeg));
           const prob = (P0 * hum * fuel[n] * pw[d] * ps) / dist[d];
@@ -103,10 +105,10 @@ export function simulateWildfire(t: Terrain, p: Params, origin: number, seed: nu
 }
 
 /**
- * Shallow-water style flood: rainfall minus infiltration falls on every cell, an optional
- * river breach adds inflow at the origin, and water moves toward lower water surfaces.
+ * Shallow-water style flood: rainfall minus infiltration falls on every cell and water
+ * moves toward lower water surfaces.
  */
-export function simulateFlood(t: Terrain, p: Params, origin: number | null): SimResult {
+export function simulateFlood(t: Terrain, p: Params): SimResult {
   const { w, h, elev, sea, cellM } = t;
   const N = w * h;
   const STEPS_PER_FRAME = 10; // 90-second steps
@@ -117,20 +119,6 @@ export function simulateFlood(t: Terrain, p: Params, origin: number | null): Sim
   const delta = new Float32Array(N);
   const arrival = new Float32Array(N).fill(Infinity);
   const sat = p.saturation / 100;
-  const cellArea = cellM * cellM;
-  const breach =
-    origin === null ? [] : (() => {
-      const o = nearestCell(t, origin, (k) => !sea[k]);
-      const oi = o % w, oj = Math.floor(o / w);
-      const cells: number[] = [];
-      for (let dj = -1; dj <= 1; dj++)
-        for (let di = -1; di <= 1; di++) {
-          const i = oi + di, j = oj + dj;
-          if (i >= 0 && j >= 0 && i < w && j < h) cells.push(j * w + i);
-        }
-      return cells;
-    })();
-  const inflowM3s = 30 + 4 * p.rainfall;
 
   const snapshot = (time: number) => {
     const f = new Uint8Array(N);
@@ -149,7 +137,6 @@ export function simulateFlood(t: Terrain, p: Params, origin: number | null): Sim
       const infil = 25 * (1 - sat) * Math.exp(-tH / 4);
       const runoff = (Math.max(0, p.rainfall - infil) / 1000) * dtH;
       for (let k = 0; k < N; k++) if (!sea[k]) depth[k] += runoff;
-      for (const k of breach) depth[k] += (inflowM3s * dtS) / cellArea / breach.length;
 
       delta.fill(0);
       for (let k = 0; k < N; k++) {
