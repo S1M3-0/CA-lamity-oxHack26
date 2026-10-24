@@ -38,6 +38,16 @@ Open http://localhost:3000. The badge in the corner should say **API ok · sqlit
 
 No database setup needed locally — it writes `backend/local.db`. Changed a model? Delete it and restart.
 
+## MapLibre + LA GeoJSON
+
+MapLibre is already used by `frontend/src/components/terrashift/SimMap.tsx` for the basemap and simulation overlay. To add your LA area of interest:
+
+1. Save valid GeoJSON to `backend/data/aoi/la.geojson`. Use WGS84 coordinates in `[longitude, latitude]` order. Commit this file when deploying.
+2. Run `npm run dev` and open http://localhost:3000/api/aoi/la. The endpoint should return your GeoJSON; a 404 means the file has not been saved at that path.
+3. In the app, select **Los Angeles**. The client fetches `/api/aoi/la` through the existing Next.js rewrite, then adds a blue GeoJSON fill and outline to MapLibre. The map displays an API error if loading fails.
+
+For deployment, set `API_URL` on the frontend Vercel project as described below. The browser uses the same `/api/aoi/la` path in both environments, so no browser CORS configuration or client-side backend URL is needed.
+
 ## Deploy to Vercel
 
 Import the same GitHub repo twice on vercel.com, once per folder:

@@ -41,6 +41,7 @@ const PRESETS: Place[] = [
   { name: "Fort McMurray", center: [-111.38, 56.726] },
   { name: "Oxford", center: [-1.255, 51.745] },
   { name: "Brisbane", center: [153.025, -27.47] },
+  { name: "Los Angeles", center: [-118.2437, 34.0522] },
 ];
 
 const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop" };
@@ -179,7 +180,7 @@ export function Simulator() {
 
         <section className="flex flex-col gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Location</h2>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             {PRESETS.map((p) => (
               <button
                 key={p.name}
@@ -402,6 +403,7 @@ export function Simulator() {
         <div className="relative h-[60vh] lg:h-auto lg:flex-1">
           <SimMap
             center={place.center}
+            showLaAoi={place.name === "Los Angeles"}
             terrain={terrain}
             hazard={viewRun?.hazard ?? null}
             frame={viewRun?.result.frames[frameIdx] ?? null}

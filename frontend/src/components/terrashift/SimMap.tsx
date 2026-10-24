@@ -2,12 +2,14 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { api, type MapGeoJSON } from "@/lib/api";
 import { renderFrame, type Hazard, type LngLat, type Terrain } from "@/lib/sim";
 
 export type Basemap = "satellite" | "streets";
 type Props = {
   center: LngLat;
+  showLaAoi: boolean;
   terrain: Terrain | null;
   hazard: Hazard | null;
   frame: Uint8Array | null;
@@ -72,6 +74,7 @@ const STYLE: StyleSpecification = {
 
 const EMPTY_PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+const EMPTY_GEOJSON: MapGeoJSON = { type: "FeatureCollection", features: [] };
 
 function corners(t: Terrain): [[number, number], [number, number], [number, number], [number, number]] {
   const { west, east, north, south } = t.bounds;
@@ -95,6 +98,9 @@ export function SimMap(props: Props) {
   const propsRef = useRef(props);
   propsRef.current = props;
   const libRef = useRef<typeof import("maplibre-gl") | null>(null);
+  const aoiDataRef = useRef<MapGeoJSON>(EMPTY_GEOJSON);
+  const [aoiStatus, setAoiStatus] = useState<"loading" | "ready" | "error" | null>(null);
+  const [aoiError, setAoiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +121,13 @@ export function SimMap(props: Props) {
       map.addControl(new lib.NavigationControl({ visualizePitch: true }), "top-right");
       map.addControl(new lib.ScaleControl({ unit: "metric" }), "bottom-left");
       map.on("load", () => {
+        map.addSource("la-aoi", { type: "geojson", data: EMPTY_GEOJSON });
+        map.addLayer({
+          id: "la-aoi-fill",
+          type: "fill",
+          source: "la-aoi",
+          paint: { "fill-color": "#38bdf8", "fill-opacity": 0.16 },
+        });
         map.addSource("sim", { type: "image", url: EMPTY_PNG, coordinates: [[0, 1], [1, 1], [1, 0], [0, 0]] });
         map.addLayer({ id: "sim", type: "raster", source: "sim", paint: { "raster-fade-duration": 0, "raster-resampling": "nearest" } });
         map.addSource("bounds", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -123,6 +136,12 @@ export function SimMap(props: Props) {
           type: "line",
           source: "bounds",
           paint: { "line-color": "#fafafa", "line-width": 1.5, "line-dasharray": [3, 2], "line-opacity": 0.8 },
+        });
+        map.addLayer({
+          id: "la-aoi-outline",
+          type: "line",
+          source: "la-aoi",
+          paint: { "line-color": "#38bdf8", "line-width": 2.5 },
         });
         loadedRef.current = true;
         applyAll();
@@ -216,9 +235,43 @@ export function SimMap(props: Props) {
   function applyAll() {
     applyCamera();
     applyOverlay();
+    applyAoi();
     applyMarkers();
     applyStyleToggles();
   }
+
+  function applyAoi() {
+    const map = mapRef.current;
+    if (!map || !loadedRef.current) return;
+    (map.getSource("la-aoi") as GeoJSONSource | undefined)?.setData(aoiDataRef.current);
+  }
+
+  useEffect(() => {
+    aoiDataRef.current = EMPTY_GEOJSON;
+    applyAoi();
+    setAoiError(null);
+    if (!props.showLaAoi) {
+      setAoiStatus(null);
+      return;
+    }
+
+    setAoiStatus("loading");
+    const controller = new AbortController();
+    api.aoi.la(controller.signal)
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        aoiDataRef.current = data;
+        applyAoi();
+        setAoiStatus("ready");
+      })
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setAoiError(error instanceof Error ? error.message : "Could not load LA GeoJSON");
+        setAoiStatus("error");
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.showLaAoi]);
 
   useEffect(applyOverlay, [props.terrain, props.hazard, props.frame]);
   useEffect(applyCamera, [props.terrain, props.center]);
@@ -228,6 +281,11 @@ export function SimMap(props: Props) {
   return (
     <div className="relative h-full min-h-[280px] w-full overflow-hidden">
       <div ref={containerRef} className="absolute inset-0" />
+      {props.showLaAoi && aoiStatus && (
+        <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[min(32rem,calc(100%-1.5rem))] rounded-lg bg-zinc-950/85 px-3 py-1.5 text-xs text-zinc-100 shadow backdrop-blur" role="status">
+          {aoiStatus === "ready" ? "LA AOI · loaded from API" : aoiStatus === "loading" ? "Loading LA AOI…" : `LA AOI: ${aoiError}`}
+        </div>
+      )}
       {props.badge && (
         <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg bg-zinc-950/80 px-3 py-1.5 text-sm font-medium text-zinc-100 shadow backdrop-blur">
           <span className="size-2.5 rounded-full" style={{ background: props.badge.color }} />

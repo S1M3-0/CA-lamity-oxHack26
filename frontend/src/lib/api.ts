@@ -4,6 +4,10 @@
  * Keep these types in sync with backend/api/models.py.
  */
 
+import type { GeoJSONSourceSpecification } from "maplibre-gl";
+
+export type MapGeoJSON = Exclude<GeoJSONSourceSpecification["data"], string>;
+
 export type Item = {
   id: number;
   title: string;
@@ -39,6 +43,9 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   health: () => request<{ status: string; database: string }>("/health"),
+  aoi: {
+    la: (signal?: AbortSignal) => request<MapGeoJSON>("/aoi/la", { signal }),
+  },
   items: {
     list: () => request<Item[]>("/items"),
     create: (data: ItemCreate) =>
