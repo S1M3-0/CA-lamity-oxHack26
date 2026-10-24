@@ -37,9 +37,9 @@ type Run = {
 };
 
 const PRESETS: Place[] = [
-  { name: "Los Angeles", center: [-118.56, 34.07] },
+  { name: "Fort McMurray", center: [-111.38, 56.726] },
   { name: "Oxford", center: [-1.255, 51.745] },
-  { name: "Rio de Janeiro", center: [-43.22, -22.96] },
+  { name: "Brisbane", center: [153.025, -27.47] },
 ];
 
 const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop" };
