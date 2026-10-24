@@ -50,6 +50,7 @@ BURN_STEPS_BY_NLCD: dict[int, int] = {
 }
 
 P0 = 0.58            # base spread probability between neighbouring cells
+SPREAD_SPEED = 0.5  # automaton updates per requested step (half the original speed)
 WIND_C1 = 0.045      # wind strength term, per m/s
 WIND_C2 = 0.131      # wind alignment term, per m/s
 SLOPE_A = 0.078      # slope term, per degree
@@ -152,8 +153,9 @@ def simulate(
     fuel_map:        override for the fuel derived from area_map.
     elevation:       optional 2D elevation grid in metres, same shape.
     cell_size:       metres per cell, used for slope.
-    steps_per_frame: automaton steps between saved frames. Fire moves at most
-                     one cell per step, so more steps let it travel further per frame.
+    steps_per_frame: requested steps between saved frames, scaled by SPREAD_SPEED.
+                     Fractional updates carry over to the next frame. Fire moves
+                     at most one cell per update.
     seed:            fix for repeatable runs.
     """
     rng = np.random.default_rng(seed)
@@ -175,30 +177,32 @@ def simulate(
 
     frames = np.empty((num_frames + 1, rows, cols), dtype=np.uint8)
     frames[0] = state
-    for step in range(1, num_frames * steps_per_frame + 1):
-        burning_rows, burning_cols = np.nonzero(state == BURNING)
-        if burning_rows.size:
-            # Work only in the box around the fire, one cell wider on each side.
-            r0, r1 = max(burning_rows.min() - 1, 0), min(burning_rows.max() + 2, rows)
-            c0, c1 = max(burning_cols.min() - 1, 0), min(burning_cols.max() + 2, cols)
-            win = (slice(r0, r1), slice(c0, c1))
-            burning = (state[win] == BURNING).astype(np.float32)
+    for frame in range(1, num_frames + 1):
+        start_step = math.floor((frame - 1) * steps_per_frame * SPREAD_SPEED)
+        end_step = math.floor(frame * steps_per_frame * SPREAD_SPEED)
+        for _ in range(start_step, end_step):
+            burning_rows, burning_cols = np.nonzero(state == BURNING)
+            if burning_rows.size:
+                # Work only in the box around the fire, one cell wider on each side.
+                r0, r1 = max(burning_rows.min() - 1, 0), min(burning_rows.max() + 2, rows)
+                c0, c1 = max(burning_cols.min() - 1, 0), min(burning_cols.max() + 2, cols)
+                win = (slice(r0, r1), slice(c0, c1))
+                burning = (state[win] == BURNING).astype(np.float32)
 
-            # Chance each cell escapes every burning neighbour this step.
-            survive = np.ones_like(burning)
-            for (dr, dc), p in zip(NEIGHBOURS, probs):
-                survive *= 1.0 - p[win] * _shift(burning, dr, dc)
+                # Chance each cell escapes every burning neighbour this step.
+                survive = np.ones_like(burning)
+                for (dr, dc), p in zip(NEIGHBOURS, probs):
+                    survive *= 1.0 - p[win] * _shift(burning, dr, dc)
 
-            # Burning cells use up their fuel.
-            lit = state[win] == BURNING
-            burn_left[win][lit] -= 1
-            state[win][lit & (burn_left[win] <= 0)] = BURNT
+                # Burning cells use up their fuel.
+                lit = state[win] == BURNING
+                burn_left[win][lit] -= 1
+                state[win][lit & (burn_left[win] <= 0)] = BURNT
 
-            catch = (state[win] == UNBURNT) & burnable[win] & (rng.random(survive.shape) >= survive)
-            state[win][catch] = BURNING
-            burn_left[win][catch] = burn_steps[win][catch]
-        if step % steps_per_frame == 0:
-            frames[step // steps_per_frame] = state
+                catch = (state[win] == UNBURNT) & burnable[win] & (rng.random(survive.shape) >= survive)
+                state[win][catch] = BURNING
+                burn_left[win][catch] = burn_steps[win][catch]
+        frames[frame] = state
 
     return frames
 

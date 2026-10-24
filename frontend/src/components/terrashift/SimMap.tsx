@@ -130,13 +130,6 @@ export function SimMap(props: Props) {
         });
         map.addSource("sim", { type: "image", url: EMPTY_PNG, coordinates: [[0, 1], [1, 1], [1, 0], [0, 0]] });
         map.addLayer({ id: "sim", type: "raster", source: "sim", paint: { "raster-fade-duration": 0, "raster-resampling": "nearest" } });
-        map.addSource("bounds", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({
-          id: "bounds",
-          type: "line",
-          source: "bounds",
-          paint: { "line-color": "#fafafa", "line-width": 1.5, "line-dasharray": [3, 2], "line-opacity": 0.8 },
-        });
         map.addLayer({
           id: "la-aoi-outline",
           type: "line",
@@ -165,22 +158,14 @@ export function SimMap(props: Props) {
     const { terrain, hazard, frame } = propsRef.current;
     if (!map || !loadedRef.current) return;
     const src = map.getSource("sim") as ImageSource | undefined;
-    const bounds = map.getSource("bounds") as GeoJSONSource | undefined;
-    if (!src || !bounds) return;
+    if (!src) return;
     if (!terrain) {
       src.updateImage({ url: EMPTY_PNG });
-      bounds.setData({ type: "FeatureCollection", features: [] });
       return;
     }
     canvasRef.current ??= document.createElement("canvas");
     renderFrame(canvasRef.current, terrain, hazard, frame);
     src.updateImage({ url: canvasRef.current.toDataURL(), coordinates: corners(terrain) });
-    const c = corners(terrain);
-    bounds.setData({
-      type: "Feature",
-      properties: {},
-      geometry: { type: "LineString", coordinates: [...c, c[0]] },
-    });
   }
 
   function applyCamera() {

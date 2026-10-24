@@ -23,7 +23,7 @@ class Weather(BaseModel):
     wind_speed_kmh: float = Field(ge=0, le=200)
     humidity: float = Field(ge=0, le=100, description="Relative humidity, %")
     num_frames: int = Field(default=100, ge=1, le=500)
-    steps_per_frame: int = Field(default=1, ge=1, le=20, description="Automaton steps between frames")
+    steps_per_frame: int = Field(default=1, ge=1, le=20, description="Requested steps between frames, run at half speed")
     seed: int | None = Field(default=None, ge=0)
 
 

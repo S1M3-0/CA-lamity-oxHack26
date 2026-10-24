@@ -5,7 +5,7 @@ import { FRAME_COUNT, FRAMES_PER_HOUR, type Bounds, type LngLat, type Params, ty
 /** Mainland LA County: the backend has real elevation (USGS 3DEP) and land cover (NLCD 2021) here. */
 export const LA_FIRE_BOUNDS: Bounds = { west: -118.95, south: 33.7, east: -117.64, north: 34.83 };
 
-/** Automaton steps per 15-minute frame (~5 min each), so fire can outrun one cell per frame. */
+/** Requested steps per 15-minute frame; CA.py runs these at half speed (~10 min per update). */
 const STEPS_PER_FRAME = 3;
 
 export function backendCoversFire(t: Terrain) {
