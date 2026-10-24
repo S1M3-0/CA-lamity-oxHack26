@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+/* Swap these once you have a theme/brand — every component uses them. */
+@theme {
+  --color-brand: #4f46e5;
+  --color-brand-hover: #4338ca;
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+}
