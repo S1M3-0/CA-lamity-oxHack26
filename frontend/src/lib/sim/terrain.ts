@@ -8,6 +8,38 @@ export const TERRARIUM_URL =
   "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png";
 export const IMAGERY_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+/** OSM's standard style paints each land use in a fixed colour, so its tiles double as a land-cover map. */
+export const OSM_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
+
+/** OSM Carto fill colours (sampled from live tiles) → burnable fuel, 0..1. */
+const OSM_FUEL: [r: number, g: number, b: number, fuel: number][] = [
+  [170, 211, 223, 0], // water
+  [221, 236, 236, 0], // glacier
+  [173, 209, 158, 0.9], // forest
+  [147, 182, 133, 0.9], // forest tree symbols
+  [200, 215, 171, 1], // scrub
+  [214, 217, 159, 0.9], // heath
+  [205, 235, 176, 0.8], // grass, meadow
+  [237, 241, 213, 0.5], // farmland
+  [200, 250, 204, 0.4], // park
+  [223, 252, 226, 0.4], // garden, leisure
+  [137, 224, 190, 0.3], // sports pitch
+  [224, 223, 223, 0.12], // residential
+  [217, 208, 201, 0.02], // buildings
+  [242, 218, 217, 0.05], // commercial
+  [255, 214, 209, 0.05], // retail
+  [235, 219, 232, 0.05], // industrial
+  [254, 254, 254, 0.05], // minor roads
+  [252, 214, 164, 0.05], // primary roads
+  [247, 250, 190, 0.05], // secondary roads
+  [249, 178, 156, 0.05], // trunk roads
+  [232, 146, 162, 0.05], // motorways
+  [238, 229, 220, 0.02], // bare rock
+  [245, 233, 198, 0.02], // sand
+];
+const URBAN_FUEL = 0.05;
+/** Cells at least this much water act as firebreaks, so rivers narrower than a cell still stop the fire. */
+const WATER_BREAK = 0.3;
 
 export function regionBounds([lon, lat]: LngLat): Bounds {
   const half = SPAN_KM / 2;
@@ -117,6 +149,46 @@ function sampleFuel(m: Mosaic, lon: number, lat: number) {
   return Math.min(1, Math.max(0.12, 0.15 + sat * 2.4 - Math.max(0, brightness - 170) / 200));
 }
 
+/** Fuel for one OSM pixel, or NaN where the colour isn't a land use (labels, unmapped land). */
+function osmPixelFuel(r: number, g: number, b: number) {
+  let best = Infinity;
+  let fuel = NaN;
+  for (const [pr, pg, pb, f] of OSM_FUEL) {
+    const d = (r - pr) ** 2 + (g - pg) ** 2 + (b - pb) ** 2;
+    if (d < best) { best = d; fuel = f; }
+  }
+  if (best <= 100) return fuel;
+  // neutral greys are building outlines, car parks and road casings
+  const max = Math.max(r, g, b);
+  if (max - Math.min(r, g, b) < 8 && max >= 190 && max <= 235) return URBAN_FUEL;
+  return NaN;
+}
+
+/** OSM land cover over one cell's footprint: mean fuel, and the fractions that are mapped and water. */
+function sampleLandCover(m: Mosaic, b: Bounds, i: number, j: number, w: number, h: number) {
+  const lon0 = b.west + (i / w) * (b.east - b.west);
+  const lon1 = b.west + ((i + 1) / w) * (b.east - b.west);
+  const lat0 = b.north - (j / h) * (b.north - b.south);
+  const lat1 = b.north - ((j + 1) / h) * (b.north - b.south);
+  const x0 = Math.max(0, Math.floor(lonToPx(lon0, TILE_ZOOM) - m.ox));
+  const x1 = Math.min(m.width, Math.max(x0 + 1, Math.round(lonToPx(lon1, TILE_ZOOM) - m.ox)));
+  const y0 = Math.max(0, Math.floor(latToPx(lat0, TILE_ZOOM) - m.oy));
+  const y1 = Math.min(m.height, Math.max(y0 + 1, Math.round(latToPx(lat1, TILE_ZOOM) - m.oy)));
+  let n = 0, known = 0, water = 0, sum = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const k = (y * m.width + x) * 4;
+      const f = osmPixelFuel(m.data[k], m.data[k + 1], m.data[k + 2]);
+      n++;
+      if (Number.isNaN(f)) continue;
+      known++;
+      sum += f;
+      if (f === 0) water++;
+    }
+  }
+  return { fuel: known ? sum / known : 0, mapped: n ? known / n : 0, water: n ? water / n : 0 };
+}
+
 function syntheticElevation(i: number, j: number, w: number) {
   const x = i / w;
   const y = j / w;
@@ -133,9 +205,10 @@ export async function loadTerrain(name: string, center: LngLat): Promise<Terrain
   const bounds = regionBounds(center);
   const w = GRID;
   const h = GRID;
-  const [dem, img] = await Promise.all([
+  const [dem, img, osm] = await Promise.all([
     loadMosaic(TERRARIUM_URL, TILE_ZOOM, bounds),
     loadMosaic(IMAGERY_URL, TILE_ZOOM, bounds),
+    loadMosaic(OSM_URL, TILE_ZOOM, bounds),
   ]);
   const elev = new Float32Array(w * h);
   const fuel = new Float32Array(w * h);
@@ -149,7 +222,13 @@ export async function loadTerrain(name: string, center: LngLat): Promise<Terrain
       const z = dem ? sampleElevation(dem, lon, lat) : syntheticElevation(i, j, w);
       elev[k] = z;
       sea[k] = dem && z <= 0.5 ? 1 : 0;
-      fuel[k] = sea[k] ? 0 : img ? sampleFuel(img, lon, lat) : 0.75;
+      const guess = img ? sampleFuel(img, lon, lat) : 0.75;
+      if (sea[k]) fuel[k] = 0;
+      else if (osm) {
+        // mapped land cover where OSM has it, the imagery guess for the rest
+        const lc = sampleLandCover(osm, bounds, i, j, w, h);
+        fuel[k] = lc.water >= WATER_BREAK ? 0 : lc.fuel * lc.mapped + guess * (1 - lc.mapped);
+      } else fuel[k] = guess;
       minElev = Math.min(minElev, z);
       maxElev = Math.max(maxElev, z);
     }
@@ -166,7 +245,7 @@ export async function loadTerrain(name: string, center: LngLat): Promise<Terrain
     fuel,
     sea,
     demSource: dem ? "terrarium" : "synthetic",
-    fuelSource: img ? "imagery" : "uniform",
+    fuelSource: osm ? "landcover" : img ? "imagery" : "uniform",
     minElev,
     maxElev,
   };

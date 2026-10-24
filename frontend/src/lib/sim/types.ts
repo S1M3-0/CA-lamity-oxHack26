@@ -20,7 +20,8 @@ export type Terrain = {
   /** 1 = sea level or below (acts as a sink for floods). */
   sea: Uint8Array;
   demSource: "terrarium" | "synthetic";
-  fuelSource: "imagery" | "uniform";
+  /** landcover = OpenStreetMap land use, with imagery filling unmapped land */
+  fuelSource: "landcover" | "imagery" | "uniform";
   minElev: number;
   maxElev: number;
 };

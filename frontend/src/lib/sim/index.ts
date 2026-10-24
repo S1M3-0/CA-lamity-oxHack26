@@ -22,8 +22,8 @@ export const HAZARDS: Record<
   flood: {
     label: "Flood",
     params: ["rainfall", "saturation"],
-    originLabel: "River breach",
-    blurb: "Rain-on-grid runoff over real elevation, with an optional breach inflow.",
+    originLabel: null,
+    blurb: "Rain-on-grid runoff over real elevation.",
   },
 };
 
@@ -72,7 +72,7 @@ export function runSimulation(
     const start = originCell >= 0 ? originCell : (t.h >> 1) * t.w + (t.w >> 1);
     return simulateWildfire(t, p, start, seed);
   }
-  return simulateFlood(t, p, originCell >= 0 ? originCell : null);
+  return simulateFlood(t, p);
 }
 
 /** Paints one frame of a run into an RGBA buffer the size of the grid. */
