@@ -19,3 +19,7 @@ __pycache__/
 # misc
 .DS_Store
 .vercel
+
+# raw rasters are too big for the Vercel backend (250 MB limit) - preprocess them first
+backend/data/**/*.tif
+backend/data/**/*.tiff
