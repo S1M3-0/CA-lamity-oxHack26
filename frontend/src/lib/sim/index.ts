@@ -21,7 +21,7 @@ export const HAZARDS: Record<
   flood: {
     label: "Flood",
     params: ["rainfall", "saturation"],
-    originLabel: "River breach (optional)",
+    originLabel: "River breach",
     blurb: "Rain-on-grid runoff over real elevation, with an optional breach inflow.",
   },
 };

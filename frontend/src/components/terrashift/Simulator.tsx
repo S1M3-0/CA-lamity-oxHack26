@@ -21,6 +21,7 @@ import {
 } from "@/lib/sim";
 import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 import { Icon, type IconName } from "./Icon";
+import { InfoTip } from "./InfoTip";
 import { SimMap, type Basemap } from "./SimMap";
 
 type Place = { name: string; center: LngLat };
@@ -80,6 +81,7 @@ export function Simulator() {
   const viewRun = activeRun && activeRun.terrain.key === key ? activeRun : null;
   const frameIdx = Math.round(t * FRAMES_PER_HOUR);
   const meta = HAZARDS[hazard];
+  const missingOrigin = meta.originLabel !== null && origin === null;
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -117,7 +119,7 @@ export function Simulator() {
   }
 
   function generate() {
-    if (!terrain) return;
+    if (!terrain || missingOrigin) return;
     const o = meta.originLabel ? origin : null;
     const seed = runSeed(hazard, terrain, params, o);
     const existing = runs.find((r) => r.seed === seed);
@@ -226,7 +228,24 @@ export function Simulator() {
         </section>
 
         <section className="flex flex-col gap-4">
-          <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Environmental conditions</h2>
+          <h2 className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            Environmental conditions
+            <InfoTip label="environmental conditions">
+              {hazard === "wildfire" ? (
+                <>
+                  <span><b className="text-zinc-100">Wind speed:</b> stronger wind pushes the fire faster in the direction it blows.</span>
+                  <span><b className="text-zinc-100">Wind direction:</b> where the wind comes from. The fire spreads the other way (follow the arrow).</span>
+                  <span><b className="text-zinc-100">Humidity:</b> damper air slows the fire. Above about 80% it barely spreads.</span>
+                  <span>Fires also spread faster uphill.</span>
+                </>
+              ) : (
+                <>
+                  <span><b className="text-zinc-100">Rainfall:</b> how hard it rains over the whole area. Some soaks in; the rest flows downhill and pools in low ground.</span>
+                  <span><b className="text-zinc-100">Soil saturation:</b> how wet the ground already is. Wetter ground soaks up less, so more water floods.</span>
+                </>
+              )}
+            </InfoTip>
+          </h2>
           {meta.params.map((k) => {
             const pm = PARAM_META[k];
             return (
@@ -261,13 +280,32 @@ export function Simulator() {
               <span className="flex items-center gap-2">
                 <Icon name="target" className={`size-4 ${hazard === "flood" ? "text-sky-400" : "text-orange-400"}`} />
                 <span>
-                  <span className="font-medium">{meta.originLabel}</span>
-                  <span className="block text-xs text-zinc-500">
+                  <span className="flex items-center gap-2 font-medium">
+                    {meta.originLabel}
+                    <InfoTip label={meta.originLabel}>
+                      {hazard === "wildfire" ? (
+                        <>
+                          <span>
+                            Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
+                            the fire starts</b>, and it spreads outward from there.
+                          </span>
+                          <span>Click somewhere else to move it, or press × to clear it.</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>
+                            Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
+                            the river bursts its banks</b>, and the extra water pours out from there on top of the rain.
+                          </span>
+                          <span>Heavier rain means more water. Click somewhere else to move it, or press × to clear it.</span>
+                        </>
+                      )}
+                    </InfoTip>
+                  </span>
+                  <span className={`block text-xs ${origin ? "text-zinc-500" : "text-amber-400"}`}>
                     {origin
-                      ? `${origin[1].toFixed(4)}, ${origin[0].toFixed(4)}`
-                      : hazard === "wildfire"
-                        ? "Click the map · default: centre"
-                        : "Click the map · default: rain only"}
+                      ? `Starts at ${origin[1].toFixed(4)}, ${origin[0].toFixed(4)}`
+                      : `Required · click the map where the ${hazard === "wildfire" ? "fire" : "breach"} starts`}
                   </span>
                 </span>
               </span>
@@ -280,11 +318,15 @@ export function Simulator() {
           )}
           <button
             onClick={generate}
-            disabled={!terrain || computing}
+            disabled={!terrain || computing || missingOrigin}
             className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-medium text-white hover:bg-brand-hover disabled:opacity-50"
           >
             <Icon name="play" />
-            {computing ? "Simulating 24 hours…" : "Generate simulation"}
+            {computing
+              ? "Simulating 24 hours…"
+              : missingOrigin
+                ? `Set the ${meta.originLabel?.toLowerCase()} first`
+                : "Generate simulation"}
           </button>
         </section>
 
