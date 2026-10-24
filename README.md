@@ -1,75 +1,127 @@
-# Hackathon App
+# TerraShift
 
-Next.js (App Router) + Tailwind CSS v4 frontend, FastAPI backend, Postgres (Neon) on Vercel — one repo, two folders, two Vercel projects.
+TerraShift is a **central-area prototype** for illustrative wildfire and flood
+scenarios in Fort McMurray, Oxford, Brisbane, and Los Angeles. It is not an
+operational hazard forecast. Each place has a 200 × 200 metric grid at 60 m
+resolution, covering 12 × 12 km around its preset centre. The city boundary
+and percentage covered are shown when a sourced city AOI is available.
+The grid outline must not be interpreted as a whole-municipality simulation.
 
-```
-package.json            runs both with `npm run dev` (npm workspace root)
-backend/                FastAPI (deployed as a Vercel Python function)
-  api/index.py          app + router registration
-  api/db.py             SQLite locally, Postgres when DATABASE_URL is set
-  api/models.py         SQLModel tables + request schemas  (placeholder: Item)
-  api/routes/items.py   example CRUD router
-  requirements.txt
-  vercel.json           sends every path to the FastAPI app
-frontend/               Next.js
-  src/app/              pages (layout.tsx, page.tsx, globals.css)
-  src/components/       ApiStatus, ItemsPanel (placeholder feature)
-  src/lib/api.ts        typed fetch client for /api/*
-  src/lib/config.ts     app name + tagline
-  next.config.ts        forwards /api/* to the backend (API_URL)
-```
+FastAPI loads immutable prepared grids from PostGIS and generates 97 frames
+spanning 24 hours at 15-minute intervals. The browser only displays those
+frames over MapLibre satellite or street tiles. Display tiles never supply
+analytical elevation or fuel. Runs remain in browser memory (up to six); user
+simulations are not stored in the database.
 
-## Run locally
+## Local setup
 
-Requires Node 20.9+ and Python 3.10+.
+Use Node 20.9+ and Python 3.10+.
 
 ```bash
-npm install                              # installs root + frontend
-python -m venv backend/.venv
-source backend/.venv/bin/activate        # Windows: backend\.venv\Scripts\activate
-pip install -r backend/requirements.txt
-
-npm run dev                              # Next on :3000 + FastAPI on :8000
+npm install
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+cp backend/.env.example backend/.env.local
 ```
 
-Activate the venv in each new terminal before `npm run dev`. To run one side only: `npm run dev:web` or `npm run dev:api`.
+Configure `backend/.env.local` for one clearly identified Supabase project.
+If you also keep a local PostGIS test database, put the Supabase URLs in
+ignored `backend/.env.supabase.local` and source that file explicitly for
+remote migrations or publication; it will override the local test URL in the
+shell for that command.
+From its Dashboard **Connect** menu, use the **Transaction pooler** URL as
+`DATABASE_URL` for FastAPI and publishing, and the **Direct connection** URL
+as `MIGRATION_DATABASE_URL` for migrations. Do not put connection strings in
+frontend environment variables or commit the local file. The runtime disables
+Psycopg prepared statements for transaction pooling. A missing `DATABASE_URL`
+is a visible grid-API configuration failure, not a SQLite fallback.
 
-Open http://localhost:3000. The badge in the corner should say **API ok · sqlite**. API docs: http://localhost:3000/api/docs
+Apply migrations in filename order against the direct connection:
 
-No database setup needed locally — it writes `backend/local.db`. Changed a model? Delete it and restart.
+```bash
+cd backend
+set -a; source .env.local; set +a
+psql "$MIGRATION_DATABASE_URL" -v ON_ERROR_STOP=1 -f ../supabase/migrations/202610240001_terrashift.sql
+```
 
-## MapLibre + LA GeoJSON
+The migration installs PostGIS in `extensions`, seeds the four place records,
+and creates versioned `places`, `source_assets`, `grid_versions`, and
+`grid_source_assets` tables. New application tables are migration-managed;
+FastAPI does not call `create_all`. The tables are backend-only and have no
+unauthenticated client read policy. When using the Supabase SQL editor rather
+than `psql`, apply the exact migration file to the same selected project.
 
-MapLibre is already used by `frontend/src/components/terrashift/SimMap.tsx` for the basemap and simulation overlay. To add your LA area of interest:
+Start both processes from the repository root after activating the backend
+environment:
 
-1. Save valid GeoJSON to `backend/data/aoi/la.geojson`. Use WGS84 coordinates in `[longitude, latitude]` order. Commit this file when deploying.
-2. Run `npm run dev` and open http://localhost:3000/api/aoi/la. The endpoint should return your GeoJSON; a 404 means the file has not been saved at that path.
-3. In the app, select **Los Angeles**. The client fetches `/api/aoi/la` through the existing Next.js rewrite, then adds a blue GeoJSON fill and outline to MapLibre. The map displays an API error if loading fails.
+```bash
+source backend/.venv/bin/activate
+npm run dev
+```
 
-For deployment, set `API_URL` on the frontend Vercel project as described below. The browser uses the same `/api/aoi/la` path in both environments, so no browser CORS configuration or client-side backend URL is needed.
+The web app is at `http://localhost:3000`; FastAPI docs are at
+`http://localhost:3000/api/docs`. `GET /api/places` lists publication status.
+Generate remains disabled for any unpublished grid.
 
-## Deploy to Vercel
+## Data and publishing
 
-Import the same GitHub repo twice on vercel.com, once per folder:
+Ingestion is a separate dependency set so geospatial packages do not enlarge
+the FastAPI function:
 
-1. **Backend:** Import → **Root Directory** `backend`, framework **Other**. Then **Storage → Create → Neon** (or `vercel install neon`) to set `DATABASE_URL`, and redeploy. Check `https://<backend>.vercel.app/api/health`.
-2. **Frontend:** Import → **Root Directory** `frontend` (framework: Next.js). Add the env var `API_URL` = the backend's URL (no trailing slash), then deploy.
-3. The badge should now say **API ok · postgresql+psycopg**.
+```bash
+backend/.venv/bin/pip install -r backend/requirements-ingest.txt
+cd backend
+python -m api.ingest prepare --place oxford --hazard wildfire --dry-run
+python -m api.ingest prepare --place oxford --hazard wildfire --publish
+```
 
-Tables are created automatically on first request. To use Neon locally too: `cd backend && vercel env pull .env.local`.
+Repeat for both hazards in each place. Source manifests live in
+`backend/ingest/manifests/{place}.json`. They identify Sentinel-2 L2A B04,
+B08, and SCL assets, dated acquisitions, DEM tiles, licence, provenance,
+CRS, no-data, and checksums. The public Earth Search STAC catalogue is an
+available Sentinel-2 L2A source when Copernicus Data Space credentials are
+not configured. Raw source COGs and QA output remain outside git. Dry-run
+checks source metadata, alignment, required-cell coverage, masks, ranges,
+and deterministic checksums, then writes a human-readable report and preview
+map. Publishing revalidates the inputs and atomically switches a place's
+active pointer while preserving older versions. A failed source or missing
+required cell stops publication; there are no synthetic-elevation or
+uniform-fuel substitutes.
 
-## When the themes drop — checklist
+The wildfire vegetation input is labelled **fuel proxy**. Its versioned rule
+uses valid Sentinel-2 observations, masks cloud, shadow, cirrus, snow, and
+no-data, sets water and clearly nonvegetated pixels to zero, and maps NDVI of
+eligible vegetation to [0,1]. It is not a validated fuel dataset. DEM source
+limits, vertical datum, DTM-versus-DSM status, water rules, and drainage-sink
+rules are recorded in each source manifest and grid quality report.
 
-1. **Name it:** edit `frontend/src/lib/config.ts`, swap colours in `frontend/src/app/globals.css` (`--color-brand`).
-2. **Model the data:** rename `Item` in `backend/api/models.py` (keep the Base / table / Create / Update pattern) and add fields.
-3. **API:** copy `backend/api/routes/items.py` for each resource, then `api.include_router(...)` in `backend/api/index.py`.
-4. **Types:** mirror the model in `frontend/src/lib/api.ts` and add client methods.
-5. **UI:** replace `ItemsPanel` with your feature; add pages under `frontend/src/app/<route>/page.tsx`.
-6. Delete `backend/local.db` after changing models.
+See [grid and API contract](docs/grid-api-contract.md) for the byte format,
+geometry, controls, frame codec, and model version. The API does not expose
+analytical arrays to the browser. The flood model uses an explicit documented
+sink mask; the previous browser model's `elevation <= 0.5 m` sea heuristic is
+not used.
 
-## Gotchas
+## Tests and deployment
 
-- Every FastAPI route must start with `/api` (the router in `index.py` adds it). Don't put Next.js route handlers under `frontend/src/app/api`.
-- Python functions on Vercel are serverless: no background threads, no writing to disk except `/tmp`, and keep cold-start imports light (heavy ML libraries can exceed size limits — call a hosted API instead).
-- Use Neon's **pooled** connection string (the Marketplace default).
-- Need secrets (e.g. an LLM API key)? Add them to the **backend** project in Vercel → Settings → Environment Variables, and to `backend/.env.local` locally; read with `os.getenv` in Python. Never expose them to the browser.
+```bash
+cd backend
+python -m unittest discover -s tests
+cd ..
+npm run typecheck
+npm run build
+```
+
+The frontend production build uses Next's Webpack option. Deploy `backend/`
+as the Python FastAPI project and `frontend/` as the Next.js project. Put the
+Supabase **Transaction pooler** URL in the backend project's `DATABASE_URL`.
+Set frontend `API_URL` to the backend deployment URL; Next rewrites `/api/*`
+to FastAPI. Keep source rasters and ingestion-only geospatial dependencies out
+of the backend function. The synchronous simulation response must stay under
+Vercel's 4.5 MB Function body limit, and its duration must fit the configured
+function limit. Measure both again after changing grid size or the model.
+
+The present model is a deterministic illustrative cellular automaton and
+shallow-water-style approximation. It does not model structures, firefighting,
+weather evolution, river hydraulics, calibrated infiltration, or uncertainty.
+Input acquisition dates and grid/model versions appear in the UI so a run can
+be interpreted in the context of its prepared data.

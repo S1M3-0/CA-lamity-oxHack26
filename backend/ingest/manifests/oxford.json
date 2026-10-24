@@ -1,0 +1,236 @@
+{
+  "manifestVersion": "ts-manifest-1",
+  "place": "oxford",
+  "name": "Oxford",
+  "center": [
+    -1.255,
+    51.745
+  ],
+  "crs": "EPSG:32630",
+  "grid": {
+    "width": 200,
+    "height": 200,
+    "cellSizeM": 60
+  },
+  "cityAoi": {
+    "path": "../../data/aoi/oxford.geojson",
+    "source": "https://www.openstreetmap.org/relation/394037",
+    "retrieved": "2026-10-24",
+    "licence": "ODbL 1.0",
+    "attribution": "\u00a9 OpenStreetMap contributors"
+  },
+  "imagery": {
+    "provider": "Element 84 Earth Search / ESA Copernicus Sentinel-2 C1 L2A",
+    "collection": "sentinel-2-c1-l2a",
+    "licence": "Copernicus Sentinel Data Terms and Conditions",
+    "attribution": "Contains modified Copernicus Sentinel data",
+    "scenes": [
+      {
+        "product": "S2B_T30UXC_20260729T111143_L2A",
+        "acquisitionDate": "2026-07-29",
+        "cloudCoverPercent": 0.072359,
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -1.532101471115368,
+                52.341345926982605
+              ],
+              [
+                -1.5638647374163384,
+                51.35444820290043
+              ],
+              [
+                0.011240379466613604,
+                51.324532702654174
+              ],
+              [
+                0.0777426550773157,
+                52.31035831899578
+              ],
+              [
+                -1.532101471115368,
+                52.341345926982605
+              ]
+            ]
+          ]
+        },
+        "assets": {
+          "B04": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/30/U/XC/2026/7/S2B_T30UXC_20260729T111143_L2A/B04.tif",
+            "sha256": "882b8947d7da81111a6b883f0fdb6d94bd7e4140dca0a1f68e44747cd9d957ea",
+            "sizeBytes": 239580845,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32630"
+          },
+          "B08": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/30/U/XC/2026/7/S2B_T30UXC_20260729T111143_L2A/B08.tif",
+            "sha256": "df588b9ae0e0551adcb295f25a19210ea14500442239a5589a4323599d713185",
+            "sizeBytes": 247919483,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32630"
+          },
+          "SCL": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/30/U/XC/2026/7/S2B_T30UXC_20260729T111143_L2A/SCL.tif",
+            "sha256": "69337d18208afd9388f517019113fe6778489e7aa9ab5c5abc22b7f3d436eeed",
+            "sizeBytes": 4401275,
+            "nodata": 0,
+            "scale": 1,
+            "offset": 0,
+            "resolutionM": 20,
+            "crs": "EPSG:32630"
+          }
+        }
+      },
+      {
+        "product": "S2C_T30UXC_20260813T111612_L2A",
+        "acquisitionDate": "2026-08-13",
+        "cloudCoverPercent": 1.203506,
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -1.532101471115368,
+                52.341345926982605
+              ],
+              [
+                -1.5638647374163384,
+                51.35444820290043
+              ],
+              [
+                0.011240379466613604,
+                51.324532702654174
+              ],
+              [
+                0.0777426550773157,
+                52.31035831899578
+              ],
+              [
+                -1.532101471115368,
+                52.341345926982605
+              ]
+            ]
+          ]
+        },
+        "assets": {
+          "B04": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/30/U/XC/2026/8/S2C_T30UXC_20260813T111612_L2A/B04.tif",
+            "sha256": "f226b17621b09f22411b56e0c4b13ec2ab2a79aae9ec6c273c7e03fe833a0dcc",
+            "sizeBytes": 241105297,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32630"
+          },
+          "B08": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/30/U/XC/2026/8/S2C_T30UXC_20260813T111612_L2A/B08.tif",
+            "sha256": "0453c739f0442ca0acff12882982bd44c571f9ed497ae6af3d88247fc310113a",
+            "sizeBytes": 248197206,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32630"
+          },
+          "SCL": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/30/U/XC/2026/8/S2C_T30UXC_20260813T111612_L2A/SCL.tif",
+            "sha256": "45b69c5c3fb537173673345a5643b927a5540229c236449e4e6c8655507a84a3",
+            "sizeBytes": 4469978,
+            "nodata": 0,
+            "scale": 1,
+            "offset": 0,
+            "resolutionM": 20,
+            "crs": "EPSG:32630"
+          }
+        }
+      }
+    ]
+  },
+  "dem": {
+    "provider": "Copernicus GLO-30 via Element 84 Earth Search",
+    "type": "DSM",
+    "sourceAcquisition": "2011-2015",
+    "verticalDatum": "EGM2008",
+    "tiles": [
+      {
+        "product": "Copernicus_DSM_COG_10_N51_00_W002_00_DEM",
+        "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_N51_00_W002_00_DEM/Copernicus_DSM_COG_10_N51_00_W002_00_DEM.tif",
+        "sha256": "231d2f57870274d62ab2ca523439462b83a789b4efa860c30b8bbc97f9323864",
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                -1.0002083333333331,
+                51.00013888888889
+              ],
+              [
+                -1.0002083333333331,
+                52.00013888888889
+              ],
+              [
+                -2.000208333333333,
+                52.00013888888889
+              ],
+              [
+                -2.000208333333333,
+                51.00013888888889
+              ],
+              [
+                -1.0002083333333331,
+                51.00013888888889
+              ]
+            ]
+          ]
+        },
+        "crs": "EPSG:4326",
+        "resolutionM": 30,
+        "verticalDatum": "EGM2008",
+        "licence": "Copernicus DEM GLO-30 free licence",
+        "attribution": "produced using Copernicus WorldDEM-30 \u00a9 DLR e.V. 2010-2014 and \u00a9 Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+        "sizeBytes": 31411886,
+        "nodata": null,
+        "unit": "metre"
+      }
+    ]
+  },
+  "processingVersion": "ts-fuel-proxy-1",
+  "fuelRule": {
+    "eligibleScl": [
+      4
+    ],
+    "nonVegetatedScl": [
+      5
+    ],
+    "waterScl": [
+      6
+    ],
+    "invalidScl": [
+      0,
+      1,
+      2,
+      3,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "ndviMin": 0.2,
+    "ndviMax": 0.8,
+    "minValidFractionPerCell": 0.95
+  },
+  "sinkRule": {
+    "type": "none",
+    "reason": "No separately verified ocean or drainage-outlet cells in the central grid; boundary outflow remains a model rule, not an ocean mask."
+  }
+}

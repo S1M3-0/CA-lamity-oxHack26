@@ -1,0 +1,8 @@
+# Install separately from the Vercel web-function dependencies.
+-r requirements.txt
+numpy>=2.0
+rasterio>=1.4
+pyproj>=3.6
+shapely>=2.0
+matplotlib>=3.9
+requests>=2.32

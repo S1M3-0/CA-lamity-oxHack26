@@ -15,6 +15,12 @@ __pycache__/
 .env
 .env*.local
 *.db
+*.tif
+*.tiff
+backend/data/sources/
+backend/data/source-cache/
+backend/data/prepared/
+backend/data/qa/
 
 # misc
 .DS_Store

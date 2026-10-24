@@ -2,15 +2,14 @@
 
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
-import { useEffect, useRef, useState } from "react";
-import { api, type MapGeoJSON } from "@/lib/api";
-import { renderFrame, type Hazard, type LngLat, type Terrain } from "@/lib/sim";
+import { useEffect, useRef } from "react";
+import type { GridMetadata, Hazard, LngLat, MapGeoJSON } from "@/lib/api";
 
 export type Basemap = "satellite" | "streets";
 type Props = {
   center: LngLat;
-  showLaAoi: boolean;
-  terrain: Terrain | null;
+  cityAoi: MapGeoJSON | null;
+  grid: GridMetadata | null;
   hazard: Hazard | null;
   frame: Uint8Array | null;
   origin: LngLat | null;
@@ -76,9 +75,27 @@ const EMPTY_PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const EMPTY_GEOJSON: MapGeoJSON = { type: "FeatureCollection", features: [] };
 
-function corners(t: Terrain): [[number, number], [number, number], [number, number], [number, number]] {
-  const { west, east, north, south } = t.bounds;
-  return [[west, north], [east, north], [east, south], [west, south]];
+function renderFrame(canvas: HTMLCanvasElement, grid: GridMetadata, hazard: Hazard | null, frame: Uint8Array | null) {
+  canvas.width = grid.width;
+  canvas.height = grid.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const image = ctx.createImageData(grid.width, grid.height);
+  if (frame && hazard) {
+    for (let k = 0; k < frame.length; k++) {
+      const v = frame[k];
+      if (!v) continue;
+      const o = k * 4;
+      if (hazard === "wildfire") {
+        if (v === 255) { image.data[o] = 255; image.data[o + 1] = 120 + ((k * 7) % 60); image.data[o + 2] = 20; image.data[o + 3] = 240; }
+        else { image.data[o] = 55; image.data[o + 1] = 18; image.data[o + 2] = 12; image.data[o + 3] = 175; }
+      } else {
+        const a = (v - 40) / 215;
+        image.data[o] = 90 - 80 * a; image.data[o + 1] = 190 - 120 * a; image.data[o + 2] = 255 - 40 * a; image.data[o + 3] = 120 + 120 * a;
+      }
+    }
+  }
+  ctx.putImageData(image, 0, 0);
 }
 
 function markerEl(className: string, text?: string) {
@@ -98,9 +115,6 @@ export function SimMap(props: Props) {
   const propsRef = useRef(props);
   propsRef.current = props;
   const libRef = useRef<typeof import("maplibre-gl") | null>(null);
-  const aoiDataRef = useRef<MapGeoJSON>(EMPTY_GEOJSON);
-  const [aoiStatus, setAoiStatus] = useState<"loading" | "ready" | "error" | null>(null);
-  const [aoiError, setAoiError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -121,11 +135,11 @@ export function SimMap(props: Props) {
       map.addControl(new lib.NavigationControl({ visualizePitch: true }), "top-right");
       map.addControl(new lib.ScaleControl({ unit: "metric" }), "bottom-left");
       map.on("load", () => {
-        map.addSource("la-aoi", { type: "geojson", data: EMPTY_GEOJSON });
+        map.addSource("city-aoi", { type: "geojson", data: EMPTY_GEOJSON });
         map.addLayer({
-          id: "la-aoi-fill",
+          id: "city-aoi-fill",
           type: "fill",
-          source: "la-aoi",
+          source: "city-aoi",
           paint: { "fill-color": "#38bdf8", "fill-opacity": 0.16 },
         });
         map.addSource("sim", { type: "image", url: EMPTY_PNG, coordinates: [[0, 1], [1, 1], [1, 0], [0, 0]] });
@@ -138,9 +152,9 @@ export function SimMap(props: Props) {
           paint: { "line-color": "#fafafa", "line-width": 1.5, "line-dasharray": [3, 2], "line-opacity": 0.8 },
         });
         map.addLayer({
-          id: "la-aoi-outline",
+          id: "city-aoi-outline",
           type: "line",
-          source: "la-aoi",
+          source: "city-aoi",
           paint: { "line-color": "#38bdf8", "line-width": 2.5 },
         });
         loadedRef.current = true;
@@ -162,20 +176,20 @@ export function SimMap(props: Props) {
 
   function applyOverlay() {
     const map = mapRef.current;
-    const { terrain, hazard, frame } = propsRef.current;
+    const { grid, hazard, frame } = propsRef.current;
     if (!map || !loadedRef.current) return;
     const src = map.getSource("sim") as ImageSource | undefined;
     const bounds = map.getSource("bounds") as GeoJSONSource | undefined;
     if (!src || !bounds) return;
-    if (!terrain) {
+    if (!grid) {
       src.updateImage({ url: EMPTY_PNG });
       bounds.setData({ type: "FeatureCollection", features: [] });
       return;
     }
     canvasRef.current ??= document.createElement("canvas");
-    renderFrame(canvasRef.current, terrain, hazard, frame);
-    src.updateImage({ url: canvasRef.current.toDataURL(), coordinates: corners(terrain) });
-    const c = corners(terrain);
+    renderFrame(canvasRef.current, grid, hazard, frame);
+    src.updateImage({ url: canvasRef.current.toDataURL(), coordinates: grid.displayCorners });
+    const c = grid.displayCorners;
     bounds.setData({
       type: "Feature",
       properties: {},
@@ -185,14 +199,15 @@ export function SimMap(props: Props) {
 
   function applyCamera() {
     const map = mapRef.current;
-    const { terrain, center } = propsRef.current;
+    const { grid, center } = propsRef.current;
     if (!map) return;
-    const key = terrain?.key ?? `c:${center.join(",")}`;
+    const key = grid?.id ?? `c:${center.join(",")}`;
     if (fittedKeyRef.current === key) return;
     fittedKeyRef.current = key;
-    if (terrain) {
-      const { west, south, east, north } = terrain.bounds;
-      map.fitBounds([[west, south], [east, north]], { padding: 24, duration: 800 });
+    if (grid) {
+      const xs = grid.displayCorners.map((c) => c[0]);
+      const ys = grid.displayCorners.map((c) => c[1]);
+      map.fitBounds([[Math.min(...xs), Math.min(...ys)], [Math.max(...xs), Math.max(...ys)]], { padding: 24, duration: 800 });
     } else {
       map.flyTo({ center, zoom: 11.5, duration: 800 });
     }
@@ -243,49 +258,18 @@ export function SimMap(props: Props) {
   function applyAoi() {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
-    (map.getSource("la-aoi") as GeoJSONSource | undefined)?.setData(aoiDataRef.current);
+    (map.getSource("city-aoi") as GeoJSONSource | undefined)?.setData(propsRef.current.cityAoi ?? EMPTY_GEOJSON);
   }
 
-  useEffect(() => {
-    aoiDataRef.current = EMPTY_GEOJSON;
-    applyAoi();
-    setAoiError(null);
-    if (!props.showLaAoi) {
-      setAoiStatus(null);
-      return;
-    }
-
-    setAoiStatus("loading");
-    const controller = new AbortController();
-    api.aoi.la(controller.signal)
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        aoiDataRef.current = data;
-        applyAoi();
-        setAoiStatus("ready");
-      })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setAoiError(error instanceof Error ? error.message : "Could not load LA GeoJSON");
-        setAoiStatus("error");
-      });
-    return () => controller.abort();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [props.showLaAoi]);
-
-  useEffect(applyOverlay, [props.terrain, props.hazard, props.frame]);
-  useEffect(applyCamera, [props.terrain, props.center]);
+  useEffect(applyAoi, [props.cityAoi]);
+  useEffect(applyOverlay, [props.grid, props.hazard, props.frame]);
+  useEffect(applyCamera, [props.grid, props.center]);
   useEffect(applyMarkers, [props.origin, props.hazard]);
   useEffect(applyStyleToggles, [props.basemap, props.terrain3d]);
 
   return (
     <div className="relative h-full min-h-[280px] w-full overflow-hidden">
       <div ref={containerRef} className="absolute inset-0" />
-      {props.showLaAoi && aoiStatus && (
-        <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[min(32rem,calc(100%-1.5rem))] rounded-lg bg-zinc-950/85 px-3 py-1.5 text-xs text-zinc-100 shadow backdrop-blur" role="status">
-          {aoiStatus === "ready" ? "LA AOI · loaded from API" : aoiStatus === "loading" ? "Loading LA AOI…" : `LA AOI: ${aoiError}`}
-        </div>
-      )}
       {props.badge && (
         <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg bg-zinc-950/80 px-3 py-1.5 text-sm font-medium text-zinc-100 shadow backdrop-blur">
           <span className="size-2.5 rounded-full" style={{ background: props.badge.color }} />

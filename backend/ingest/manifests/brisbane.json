@@ -1,0 +1,280 @@
+{
+  "manifestVersion": "ts-manifest-1",
+  "place": "brisbane",
+  "name": "Brisbane",
+  "center": [
+    153.025,
+    -27.47
+  ],
+  "crs": "EPSG:32756",
+  "grid": {
+    "width": 200,
+    "height": 200,
+    "cellSizeM": 60
+  },
+  "cityAoi": {
+    "path": "../../data/aoi/brisbane.geojson",
+    "source": "https://www.openstreetmap.org/relation/14027280",
+    "retrieved": "2026-10-24",
+    "licence": "ODbL 1.0",
+    "attribution": "\u00a9 OpenStreetMap contributors"
+  },
+  "imagery": {
+    "provider": "Element 84 Earth Search / ESA Copernicus Sentinel-2 C1 L2A",
+    "collection": "sentinel-2-c1-l2a",
+    "licence": "Copernicus Sentinel Data Terms and Conditions",
+    "attribution": "Contains modified Copernicus Sentinel data",
+    "scenes": [
+      {
+        "product": "S2C_T56JMQ_20260812T235229_L2A",
+        "acquisitionDate": "2026-08-12",
+        "cloudCoverPercent": 0.022869,
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                153.03938907828956,
+                -27.122473146899903
+              ],
+              [
+                152.76536463913834,
+                -28.11351185199983
+              ],
+              [
+                153.0993594158732,
+                -28.113676585122363
+              ],
+              [
+                153.09846880258465,
+                -27.122444153410072
+              ],
+              [
+                153.03938907828956,
+                -27.122473146899903
+              ]
+            ]
+          ]
+        },
+        "assets": {
+          "B04": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/56/J/MQ/2026/8/S2C_T56JMQ_20260812T235229_L2A/B04.tif",
+            "sha256": "3c4fe16309fc8c32b319f53fc98570bd21de1e8033b2359e07c803dd552fde3a",
+            "sizeBytes": 42398370,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32756"
+          },
+          "B08": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/56/J/MQ/2026/8/S2C_T56JMQ_20260812T235229_L2A/B08.tif",
+            "sha256": "61bc916de52d1dcec69ed5c3fe1120301847120507e4221357f69155cda5ee37",
+            "sizeBytes": 45060084,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32756"
+          },
+          "SCL": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/56/J/MQ/2026/8/S2C_T56JMQ_20260812T235229_L2A/SCL.tif",
+            "sha256": "fe315373f9555b0bd962c372f4aaa52d7ce068f8e580ae0383555a312bfe7ebc",
+            "sizeBytes": 733467,
+            "nodata": 0,
+            "scale": 1,
+            "offset": 0,
+            "resolutionM": 20,
+            "crs": "EPSG:32756"
+          }
+        }
+      },
+      {
+        "product": "S2B_T56JMQ_20260920T000410_L2A",
+        "acquisitionDate": "2026-09-20",
+        "cloudCoverPercent": 0.003769,
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                151.99066411886042,
+                -27.118852026580825
+              ],
+              [
+                151.98153695140297,
+                -28.109930636302142
+              ],
+              [
+                153.0993594158732,
+                -28.113676585122363
+              ],
+              [
+                153.09861515264942,
+                -27.28885936815049
+              ],
+              [
+                152.34830306810932,
+                -27.12096677016277
+              ],
+              [
+                151.99066411886042,
+                -27.118852026580825
+              ]
+            ]
+          ]
+        },
+        "assets": {
+          "B04": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/56/J/MQ/2026/9/S2B_T56JMQ_20260920T000410_L2A/B04.tif",
+            "sha256": "58e854013042d520a6090ebfe31a2b8bccb842a77dfa905dc8e5262eb01e16f3",
+            "sizeBytes": 216571091,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32756"
+          },
+          "B08": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/56/J/MQ/2026/9/S2B_T56JMQ_20260920T000410_L2A/B08.tif",
+            "sha256": "614a617dc0b16ab47bf0fb0ec838c8cb86da67213bae51f65401c494ca145ba8",
+            "sizeBytes": 230618777,
+            "nodata": 0,
+            "scale": 0.0001,
+            "offset": -0.1,
+            "resolutionM": 10,
+            "crs": "EPSG:32756"
+          },
+          "SCL": {
+            "url": "https://e84-earth-search-sentinel-data.s3.us-west-2.amazonaws.com/sentinel-2-c1-l2a/56/J/MQ/2026/9/S2B_T56JMQ_20260920T000410_L2A/SCL.tif",
+            "sha256": "6b2693aef364cd425010548784ea9b31d1e172dc1db68ac1233d51020537ffb3",
+            "sizeBytes": 3416699,
+            "nodata": 0,
+            "scale": 1,
+            "offset": 0,
+            "resolutionM": 20,
+            "crs": "EPSG:32756"
+          }
+        }
+      }
+    ]
+  },
+  "dem": {
+    "provider": "Copernicus GLO-30 via Element 84 Earth Search",
+    "type": "DSM",
+    "sourceAcquisition": "2011-2015",
+    "verticalDatum": "EGM2008",
+    "tiles": [
+      {
+        "product": "Copernicus_DSM_COG_10_S28_00_E153_00_DEM",
+        "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_S28_00_E153_00_DEM/Copernicus_DSM_COG_10_S28_00_E153_00_DEM.tif",
+        "sha256": "dea0be928bddde7158a1ba8d6d9dffde62d0f8d2c9b3a6eef13dcea94069e196",
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                153.9998611111111,
+                -27.999861111111112
+              ],
+              [
+                153.9998611111111,
+                -26.999861111111112
+              ],
+              [
+                152.9998611111111,
+                -26.999861111111112
+              ],
+              [
+                152.9998611111111,
+                -27.999861111111112
+              ],
+              [
+                153.9998611111111,
+                -27.999861111111112
+              ]
+            ]
+          ]
+        },
+        "crs": "EPSG:4326",
+        "resolutionM": 30,
+        "verticalDatum": "EGM2008",
+        "licence": "Copernicus DEM GLO-30 free licence",
+        "attribution": "produced using Copernicus WorldDEM-30 \u00a9 DLR e.V. 2010-2014 and \u00a9 Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+        "sizeBytes": 15824152,
+        "nodata": null,
+        "unit": "metre"
+      },
+      {
+        "product": "Copernicus_DSM_COG_10_S28_00_E152_00_DEM",
+        "url": "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_S28_00_E152_00_DEM/Copernicus_DSM_COG_10_S28_00_E152_00_DEM.tif",
+        "sha256": "18ab9419d9beacbdac6e8397f41affe5b76fce6a1ac101fd1b1dfcd88fe462fc",
+        "footprint": {
+          "type": "Polygon",
+          "coordinates": [
+            [
+              [
+                152.9998611111111,
+                -27.999861111111112
+              ],
+              [
+                152.9998611111111,
+                -26.999861111111112
+              ],
+              [
+                151.9998611111111,
+                -26.999861111111112
+              ],
+              [
+                151.9998611111111,
+                -27.999861111111112
+              ],
+              [
+                152.9998611111111,
+                -27.999861111111112
+              ]
+            ]
+          ]
+        },
+        "crs": "EPSG:4326",
+        "resolutionM": 30,
+        "verticalDatum": "EGM2008",
+        "licence": "Copernicus DEM GLO-30 free licence",
+        "attribution": "produced using Copernicus WorldDEM-30 \u00a9 DLR e.V. 2010-2014 and \u00a9 Airbus Defence and Space GmbH 2014-2018 provided under COPERNICUS by the European Union and ESA; all rights reserved",
+        "sizeBytes": 47261499,
+        "nodata": null,
+        "unit": "metre"
+      }
+    ]
+  },
+  "processingVersion": "ts-fuel-proxy-1",
+  "fuelRule": {
+    "eligibleScl": [
+      4
+    ],
+    "nonVegetatedScl": [
+      5
+    ],
+    "waterScl": [
+      6
+    ],
+    "invalidScl": [
+      0,
+      1,
+      2,
+      3,
+      7,
+      8,
+      9,
+      10,
+      11
+    ],
+    "ndviMin": 0.2,
+    "ndviMax": 0.8,
+    "minValidFractionPerCell": 0.95
+  },
+  "sinkRule": {
+    "type": "none",
+    "reason": "No separately verified ocean or drainage-outlet cells in the central grid; boundary outflow remains a model rule, not an ocean mask."
+  }
+}
