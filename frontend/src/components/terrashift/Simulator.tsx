@@ -7,9 +7,11 @@ import {
   HAZARDS,
   HOURS,
   PARAM_META,
+  backendCoversFire,
   compass,
   describeParams,
   loadTerrain,
+  runBackendWildfire,
   runSeed,
   runSimulation,
   terrainKey,
@@ -35,6 +37,9 @@ type Run = {
   params: Params;
   origin: LngLat | null;
   result: SimResult;
+  /** grid the frames were simulated on (the backend samples its own) */
+  grid: Terrain;
+  source: "backend" | "browser";
 };
 
 const PRESETS: Place[] = [
@@ -42,6 +47,7 @@ const PRESETS: Place[] = [
   { name: "Oxford", center: [-1.255, 51.745] },
   { name: "Brisbane", center: [153.025, -27.47] },
   { name: "Los Angeles", center: [-118.2437, 34.0522] },
+  { name: "Topanga, LA", center: [-118.6, 34.1] },
 ];
 
 const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop" };
@@ -69,6 +75,7 @@ export function Simulator() {
   const [runs, setRuns] = useState<Run[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [computing, setComputing] = useState(false);
+  const [simNote, setSimNote] = useState<string | null>(null);
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
@@ -83,6 +90,7 @@ export function Simulator() {
   const frameIdx = Math.round(t * FRAMES_PER_HOUR);
   const meta = HAZARDS[hazard];
   const missingOrigin = meta.originLabel !== null && origin === null;
+  const useBackend = hazard === "wildfire" && terrain !== null && backendCoversFire(terrain);
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -133,9 +141,19 @@ export function Simulator() {
     }
     setComputing(true);
     setPlaying(false);
-    setTimeout(() => {
-      const result = runSimulation(hazard, terrain, params, o);
-      const run: Run = { id: nextId.current++, seed, hazard, place, terrain, params, origin: o, result };
+    setSimNote(null);
+    setTimeout(async () => {
+      let sim: Pick<Run, "result" | "grid" | "source"> | null = null;
+      if (useBackend) {
+        try {
+          sim = { ...(await runBackendWildfire(terrain, params, o, seed)), source: "backend" };
+        } catch (e) {
+          const why = e instanceof Error ? e.message : "request failed";
+          setSimNote(`LA fire model unavailable (${why}), so this run used the in-browser model.`);
+        }
+      }
+      sim ??= { result: runSimulation(hazard, terrain, params, o), grid: terrain, source: "browser" };
+      const run: Run = { id: nextId.current++, seed, hazard, place, terrain, params, origin: o, ...sim };
       setRuns((old) => [run, ...old].slice(0, MAX_RUNS));
       setActiveId(run.id);
       setT(0);
@@ -204,6 +222,7 @@ export function Simulator() {
                   )}–${Math.round(terrain.maxElev)} m`
                 : "Loading elevation and imagery…"}
             {terrain?.demSource === "synthetic" && " · elevation tiles unavailable, using synthetic terrain"}
+            {useBackend && " · wildfire runs on the LA maps (USGS 3DEP elevation, NLCD 2021 land cover)"}
           </p>
         </section>
 
@@ -329,6 +348,7 @@ export function Simulator() {
                 ? `Set the ${meta.originLabel?.toLowerCase()} first`
                 : "Generate simulation"}
           </button>
+          {simNote && <p className="text-xs text-amber-400">{simNote}</p>}
         </section>
 
         {runs.length > 0 && (
@@ -393,6 +413,7 @@ export function Simulator() {
             {viewRun ? (
               <>
                 Run {viewRun.id} · {HAZARDS[viewRun.hazard].label} · {describeParams(viewRun.hazard, viewRun.params)}
+                {viewRun.source === "backend" && " · LA maps"}
               </>
             ) : (
               "No simulation shown. Set conditions and press Generate."
@@ -404,7 +425,7 @@ export function Simulator() {
           <SimMap
             center={place.center}
             showLaAoi={place.name === "Los Angeles"}
-            terrain={terrain}
+            terrain={viewRun?.grid ?? terrain}
             hazard={viewRun?.hazard ?? null}
             frame={viewRun?.result.frames[frameIdx] ?? null}
             origin={meta.originLabel ? (viewRun ? viewRun.origin : origin) : null}

@@ -19,3 +19,7 @@ __pycache__/
 # misc
 .DS_Store
 .vercel
+
+# maps (large rasters live in backend/data/maps, not git)
+*.tif
+backend/data/cache/

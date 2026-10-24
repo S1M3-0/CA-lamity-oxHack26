@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi import APIRouter, FastAPI  # noqa: E402
+from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
 
 from api.db import DATABASE_URL, init_db  # noqa: E402
 from api.routes import aoi, fire, items  # noqa: E402
@@ -32,6 +33,8 @@ app = FastAPI(
     openapi_url="/api/openapi.json",
     lifespan=lifespan,
 )
+# Fire frames are large but highly repetitive, so they compress very well.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 api = APIRouter(prefix="/api")
 

@@ -5,8 +5,36 @@
  */
 
 import type { GeoJSONSourceSpecification } from "maplibre-gl";
+import type { Bounds } from "@/lib/sim/types";
 
 export type MapGeoJSON = Exclude<GeoJSONSourceSpecification["data"], string>;
+
+/** Keep in sync with backend/api/routes/fire.py. */
+export type LaFireRequest = {
+  /** [lon, lat] pairs */
+  ignition_points: [number, number][];
+  /** degrees the wind blows from */
+  wind_direction: number;
+  wind_speed_kmh: number;
+  /** relative humidity, % */
+  humidity: number;
+  bounds?: Bounds;
+  max_cells?: number;
+  num_frames?: number;
+  steps_per_frame?: number;
+  seed?: number;
+};
+
+export type FireResult = {
+  bounds: Bounds;
+  w: number;
+  h: number;
+  cellM: number;
+  /** base64, one byte per cell, row 0 north: 0 unburnt, 255 burning, 110 burnt */
+  frames: string[];
+  /** km² affected per frame */
+  area: number[];
+};
 
 export type Item = {
   id: number;
@@ -45,6 +73,10 @@ export const api = {
   health: () => request<{ status: string; database: string }>("/health"),
   aoi: {
     la: (signal?: AbortSignal) => request<MapGeoJSON>("/aoi/la", { signal }),
+  },
+  fire: {
+    la: (data: LaFireRequest) =>
+      request<FireResult>("/fire/la", { method: "POST", body: JSON.stringify(data) }),
   },
   items: {
     list: () => request<Item[]>("/items"),

@@ -5,6 +5,7 @@ import { type Hazard, type LngLat, type Params, type SimResult, type Terrain } f
 
 export * from "./types";
 export { loadTerrain, lngLatToCell, cellToLngLat, terrainKey } from "./terrain";
+export { backendCoversFire, runBackendWildfire } from "./backend";
 
 export type ParamKey = keyof Params;
 

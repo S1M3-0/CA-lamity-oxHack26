@@ -280,7 +280,8 @@ export function SimMap(props: Props) {
 
   return (
     <div className="relative h-full min-h-[280px] w-full overflow-hidden">
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* inline: maplibre-gl.css sets .maplibregl-map to position:relative and beats Tailwind's layered classes */}
+      <div ref={containerRef} className="absolute inset-0" style={{ position: "absolute", inset: 0 }} />
       {props.showLaAoi && aoiStatus && (
         <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[min(32rem,calc(100%-1.5rem))] rounded-lg bg-zinc-950/85 px-3 py-1.5 text-xs text-zinc-100 shadow backdrop-blur" role="status">
           {aoiStatus === "ready" ? "LA AOI · loaded from API" : aoiStatus === "loading" ? "Loading LA AOI…" : `LA AOI: ${aoiError}`}
