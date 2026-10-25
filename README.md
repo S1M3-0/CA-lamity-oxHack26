@@ -2,7 +2,7 @@
 
 See the [architecture diagram](docs/architecture.md).
 
-Our OxHack 2026 project. **TerraShift** (the app) simulates wildfires and floods on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. For wildfire and flood runs, it also shows the nearest evacuation centres that stay safe as the disaster spreads.
+Our OxHack 2026 project. CA-lamity simulates wildfires and floods on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. It also shows the nearest evacuation centres that stay safe as the disaster spreads.
 
 Repo: https://github.com/S1M3-0/CA-lamity-oxHack26
 
@@ -108,7 +108,7 @@ The backend endpoint is `GET /api/weather/yesterday?latitude=51.745&longitude=-1
 ## Deploying
 
 - **Backend (Vultr):** run `uvicorn api.index:app` from `backend/`, without `--reload`, behind HTTPS (e.g. Caddy or nginx). Copy `data/maps/` onto the server and set `DATABASE_URL`.
-- **Frontend (Vercel):** import the repo with **Root Directory** `frontend`, then set `API_URL` to the backend's URL, with no trailing slash.
+- **Frontend (Vercel):** import the repo with **Root Directory** `frontend`. Production API requests are forwarded to `https://api.ca-lamity.live` by `frontend/next.config.ts`.
 - The browser only ever calls `/api/*` on the frontend's domain, so no CORS setup is needed, and the database credentials stay on the backend.
 
 ## Data and credits
