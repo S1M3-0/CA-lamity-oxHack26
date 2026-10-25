@@ -94,7 +94,7 @@ Without them, wildfires inside LA fall back to the in-browser model. Floods don'
 ## Deploying
 
 - **Backend (Vultr):** run `uvicorn api.index:app` from `backend/`, without `--reload`, behind HTTPS (e.g. Caddy or nginx). Copy `data/maps/` onto the server and set `DATABASE_URL`.
-- **Frontend (Vercel):** import the repo with **Root Directory** `frontend`, then set `API_URL` to the backend's URL, with no trailing slash.
+- **Frontend (Vercel):** import the repo with **Root Directory** `frontend`. Production API requests are forwarded to `https://api.ca-lamity.live` by `frontend/next.config.ts`.
 - The browser only ever calls `/api/*` on the frontend's domain, so no CORS setup is needed, and the database credentials stay on the backend.
 
 ## Data and credits
