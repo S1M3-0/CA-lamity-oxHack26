@@ -1,6 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, type RunStats, type SafePoint, type SavedRun } from "@/lib/api";
+import { buildRunCreate } from "@/lib/runs";
 import {
   DEFAULT_PARAMS,
   FRAMES_PER_HOUR,
@@ -25,21 +27,31 @@ import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 import { Icon, type IconName } from "./Icon";
 import { InfoTip } from "./InfoTip";
 import { SimMap, type Basemap } from "./SimMap";
+import { StatsPanel } from "./StatsPanel";
 
 type Place = { name: string; center: LngLat };
 
+/** frames plus the grid they were simulated on (the backend samples its own) */
+type Sim = { result: SimResult; grid: Terrain };
+
 type Run = {
   id: number;
+  /** row in Tiger Data, once saved */
+  dbId: number | null;
   seed: number;
   hazard: Hazard;
   place: Place;
-  terrain: Terrain;
+  /** terrainKey of the place */
+  key: string;
   params: Params;
   origin: LngLat | null;
-  result: SimResult;
-  /** grid the frames were simulated on (the backend samples its own) */
-  grid: Terrain;
   source: "backend" | "browser";
+  /** null for runs reloaded from Tiger Data until they're re-simulated (same seed, same result) */
+  sim: Sim | null;
+  safePoints: SafePoint[] | null;
+  stats: RunStats | null;
+  /** why this run isn't saved or its safe points / stats are missing */
+  note: string | null;
 };
 
 const PRESETS: Place[] = [
@@ -54,6 +66,27 @@ const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop"
 const RUN_COLORS = ["#f97316", "#38bdf8", "#a3e635", "#e879f9", "#facc15", "#f87171"];
 const SPEEDS = [0.5, 1, 2, 4];
 const MAX_RUNS = 6;
+
+const errorText = (e: unknown) => (e instanceof Error ? e.message : "request failed");
+
+function fromSaved(s: SavedRun, id: number): Run {
+  const place = PRESETS.find((p) => p.name === s.place_name) ?? { name: s.place_name, center: s.center };
+  return {
+    id,
+    dbId: s.id,
+    seed: s.seed,
+    hazard: s.hazard,
+    place,
+    key: terrainKey(place.center),
+    params: { ...DEFAULT_PARAMS, ...s.params },
+    origin: s.origin,
+    source: s.source,
+    sim: null,
+    safePoints: null,
+    stats: null,
+    note: null,
+  };
+}
 
 function formatT(hours: number) {
   const f = Math.round(hours * FRAMES_PER_HOUR);
@@ -81,13 +114,23 @@ export function Simulator() {
   const [speed, setSpeed] = useState(1);
   const [basemap, setBasemap] = useState<Basemap>("satellite");
   const [terrain3d, setTerrain3d] = useState(false);
+  const [dbNote, setDbNote] = useState<string | null>(null);
   const nextId = useRef(1);
+  /** set once the user generates, so restoring saved runs doesn't overwrite their choices */
+  const touched = useRef(false);
+  const resimulating = useRef(new Set<number>());
 
   const key = terrainKey(place.center);
   const terrain = terrains[key] ?? null;
   const activeRun = runs.find((r) => r.id === activeId) ?? null;
-  const viewRun = activeRun && activeRun.terrain.key === key ? activeRun : null;
+  const viewRun = activeRun && activeRun.key === key ? activeRun : null;
+  const viewSim = viewRun?.sim ?? null;
   const frameIdx = Math.round(t * FRAMES_PER_HOUR);
+  const hour = Math.min(HOURS, Math.floor(t));
+  const hourSafePoints = useMemo(
+    () => viewRun?.safePoints?.filter((p) => p.hour === hour) ?? [],
+    [viewRun?.safePoints, hour],
+  );
   const meta = HAZARDS[hazard];
   const missingOrigin = meta.originLabel !== null && origin === null;
   const useBackend = hazard === "wildfire" && terrain !== null && backendCoversFire(terrain);
@@ -122,6 +165,83 @@ export function Simulator() {
     if (playing && t >= HOURS) setPlaying(false);
   }, [playing, t]);
 
+  // Bring back saved scenarios and the last conditions used from Tiger Data.
+  useEffect(() => {
+    let cancelled = false;
+    api.runs
+      .list(MAX_RUNS)
+      .then((saved) => {
+        if (cancelled || saved.length === 0) return;
+        const restored = saved.map((s) => fromSaved(s, nextId.current++));
+        setRuns((old) => [...old, ...restored.filter((r) => !old.some((o) => o.dbId === r.dbId))].slice(0, MAX_RUNS));
+        if (touched.current) return;
+        loadSettings(restored[0]);
+        setActiveId(restored[0].id);
+      })
+      .catch((e) => !cancelled && setDbNote(`Saved scenarios unavailable: ${errorText(e)}`));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restored runs come back without frames; re-run them (same seed, same result) once their terrain is loaded.
+  useEffect(() => {
+    const r = viewRun;
+    if (!r || r.sim || !terrain || resimulating.current.has(r.id)) return;
+    resimulating.current.add(r.id);
+    setComputing(true);
+    simulateRun(r.hazard, terrain, r.params, r.origin, r.seed, r.source === "backend").then(({ sim }) => {
+      updateRun(r.id, { sim });
+      setComputing(false);
+      if (r.dbId !== null && (!r.stats || !r.safePoints)) void loadResults(r.id, r.dbId);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewRun, terrain]);
+
+  const updateRun = (id: number, patch: Partial<Run>) =>
+    setRuns((old) => old.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+
+  async function simulateRun(h: Hazard, tr: Terrain, p: Params, o: LngLat | null, seed: number, wantBackend: boolean) {
+    if (wantBackend) {
+      try {
+        return { sim: await runBackendWildfire(tr, p, o, seed), source: "backend" as const };
+      } catch (e) {
+        setSimNote(`LA fire model unavailable (${errorText(e)}), so this run used the in-browser model.`);
+      }
+    }
+    return { sim: { result: runSimulation(h, tr, p, o), grid: tr }, source: "browser" as const };
+  }
+
+  /** Store the run in Tiger Data, then read back its statistics and safe points. */
+  async function save(run: Run, sim: Sim) {
+    try {
+      const saved = await api.runs.create(
+        buildRunCreate(
+          { hazard: run.hazard, placeName: run.place.name, center: run.place.center, params: run.params, origin: run.origin, seed: run.seed, source: run.source },
+          sim.grid,
+          sim.result,
+        ),
+      );
+      updateRun(run.id, { dbId: saved.id });
+      await loadResults(run.id, saved.id);
+    } catch (e) {
+      updateRun(run.id, { note: `Not saved to Tiger Data: ${errorText(e)}` });
+    }
+  }
+
+  async function loadResults(id: number, dbId: number) {
+    const [stats, points] = await Promise.allSettled([api.runs.stats(dbId), api.runs.safePoints(dbId)]);
+    const failed = [stats, points]
+      .filter((r): r is PromiseRejectedResult => r.status === "rejected")
+      .map((r) => errorText(r.reason));
+    updateRun(id, {
+      stats: stats.status === "fulfilled" ? stats.value : null,
+      safePoints: points.status === "fulfilled" ? points.value : null,
+      note: failed.length ? failed.join(" · ") : null,
+    });
+  }
+
   function changePlace(p: Place) {
     if (terrainKey(p.center) !== key) setOrigin(null);
     setPlace(p);
@@ -131,7 +251,7 @@ export function Simulator() {
     if (!terrain || missingOrigin) return;
     const o = meta.originLabel ? origin : null;
     const seed = runSeed(hazard, terrain, params, o);
-    const existing = runs.find((r) => r.seed === seed);
+    const existing = runs.find((r) => r.seed === seed && r.key === key);
     if (existing) {
       // same conditions → same (reproducible) simulation; just replay it
       setActiveId(existing.id);
@@ -139,32 +259,43 @@ export function Simulator() {
       setPlaying(true);
       return;
     }
+    touched.current = true;
     setComputing(true);
     setPlaying(false);
     setSimNote(null);
     setTimeout(async () => {
-      let sim: Pick<Run, "result" | "grid" | "source"> | null = null;
-      if (useBackend) {
-        try {
-          sim = { ...(await runBackendWildfire(terrain, params, o, seed)), source: "backend" };
-        } catch (e) {
-          const why = e instanceof Error ? e.message : "request failed";
-          setSimNote(`LA fire model unavailable (${why}), so this run used the in-browser model.`);
-        }
-      }
-      sim ??= { result: runSimulation(hazard, terrain, params, o), grid: terrain, source: "browser" };
-      const run: Run = { id: nextId.current++, seed, hazard, place, terrain, params, origin: o, ...sim };
+      const { sim, source } = await simulateRun(hazard, terrain, params, o, seed, useBackend);
+      const run: Run = {
+        id: nextId.current++, dbId: null, seed, hazard, place, key, params, origin: o, source, sim,
+        safePoints: null, stats: null, note: null,
+      };
       setRuns((old) => [run, ...old].slice(0, MAX_RUNS));
       setActiveId(run.id);
       setT(0);
       setPlaying(true);
       setComputing(false);
+      void save(run, sim);
     }, 30);
+  }
+
+  /** Take the current simulation off the map so a new start point can be placed. Saved scenarios stay. */
+  function clearSimulation() {
+    setPlaying(false);
+    setT(0);
+    setActiveId(null);
+    setOrigin(null);
+    setSimNote(null);
   }
 
   function viewScenario(r: Run) {
     setActiveId(r.id);
-    if (r.terrain.key !== key) setPlace(r.place);
+    if (r.key !== key) setPlace(r.place);
+  }
+
+  function deleteRun(r: Run) {
+    setRuns((old) => old.filter((x) => x.id !== r.id));
+    if (r.id === activeId) setActiveId(null);
+    if (r.dbId !== null) api.runs.remove(r.dbId).catch((e) => setDbNote(`Couldn't delete run from Tiger Data: ${errorText(e)}`));
   }
 
   function loadSettings(r: Run) {
@@ -185,7 +316,8 @@ export function Simulator() {
     setT((v) => Math.max(0, Math.min(HOURS, Math.round((v + h) * FRAMES_PER_HOUR) / FRAMES_PER_HOUR)));
   };
 
-  const area = viewRun ? viewRun.result.area[frameIdx] : 0;
+  const area = viewSim ? viewSim.result.area[frameIdx] : 0;
+  const runStatus = viewRun ? viewRun.note ?? (viewRun.dbId === null ? "Saving to Tiger Data…" : null) : null;
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 lg:flex">
@@ -317,26 +449,46 @@ export function Simulator() {
                   </span>
                 </span>
               </span>
-              {origin && (
+              {origin && !viewRun && (
                 <button onClick={() => setOrigin(null)} className="text-zinc-500 hover:text-zinc-200" aria-label="Clear point">
                   <Icon name="x" />
                 </button>
               )}
             </div>
           )}
-          <button
-            onClick={generate}
-            disabled={!terrain || computing || missingOrigin}
-            className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-medium text-white hover:bg-brand-hover disabled:opacity-50"
-          >
-            <Icon name="play" />
-            {computing
-              ? "Simulating 24 hours…"
-              : missingOrigin
-                ? `Set the ${meta.originLabel?.toLowerCase()} first`
-                : "Generate simulation"}
-          </button>
+          {viewRun ? (
+            <>
+              <button
+                onClick={clearSimulation}
+                disabled={computing}
+                className="inline-flex items-center justify-center gap-2 rounded-lg border border-zinc-600 bg-zinc-800 px-4 py-2.5 font-medium text-zinc-100 hover:bg-zinc-700 disabled:opacity-50"
+              >
+                <Icon name="x" />
+                Clear simulation
+              </button>
+              <p className="text-xs text-zinc-500">
+                Clear the current simulation to{" "}
+                {meta.originLabel ? `place a new ${meta.originLabel.toLowerCase()}` : "generate another"}. It stays in
+                saved scenarios.
+              </p>
+            </>
+          ) : (
+            <button
+              onClick={generate}
+              disabled={!terrain || computing || missingOrigin}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+            >
+              <Icon name="play" />
+              {computing
+                ? "Simulating 24 hours…"
+                : missingOrigin
+                  ? `Set the ${meta.originLabel?.toLowerCase()} first`
+                  : "Generate simulation"}
+            </button>
+          )}
           {simNote && <p className="text-xs text-amber-400">{simNote}</p>}
+          {viewRun?.note && <p className="text-xs text-amber-400">{viewRun.note}</p>}
+          {dbNote && <p className="text-xs text-zinc-500">{dbNote}</p>}
         </section>
 
         {runs.length > 0 && (
@@ -364,10 +516,7 @@ export function Simulator() {
                   Load settings
                 </button>
                 <button
-                  onClick={() => {
-                    setRuns((old) => old.filter((x) => x.id !== r.id));
-                    if (r.id === activeId) setActiveId(null);
-                  }}
+                  onClick={() => deleteRun(r)}
                   className="shrink-0 text-zinc-500 hover:text-zinc-200"
                   aria-label={`Delete run ${r.id}`}
                 >
@@ -413,13 +562,14 @@ export function Simulator() {
           <SimMap
             center={place.center}
             showLaAoi={place.name === "Los Angeles"}
-            terrain={viewRun?.grid ?? terrain}
-            hazard={viewRun?.hazard ?? null}
-            frame={viewRun?.result.frames[frameIdx] ?? null}
+            terrain={viewSim?.grid ?? terrain}
+            hazard={viewSim ? viewRun!.hazard : null}
+            frame={viewSim?.result.frames[frameIdx] ?? null}
             origin={meta.originLabel ? (viewRun ? viewRun.origin : origin) : null}
+            safePoints={viewSim ? hourSafePoints : []}
             basemap={basemap}
             terrain3d={terrain3d}
-            onMapClick={(ll) => meta.originLabel && setOrigin(ll)}
+            onMapClick={(ll) => meta.originLabel && !viewRun && setOrigin(ll)}
             badge={viewRun ? { text: `Run ${viewRun.id} · ${formatT(t)}`, color: RUN_COLORS[viewRun.id % RUN_COLORS.length] } : null}
           />
           {computing && (
@@ -427,7 +577,7 @@ export function Simulator() {
               Running cellular automaton…
             </div>
           )}
-          {viewRun && <Legend hazard={viewRun.hazard} />}
+          {viewSim && <Legend hazard={viewRun!.hazard} safePoints={hourSafePoints.length > 0} />}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3">
@@ -456,8 +606,19 @@ export function Simulator() {
             >
               <Icon name="fast" /> {speed}h/s
             </button>
+            {viewRun && (
+              <StatsPanel
+                hazard={viewRun.hazard}
+                title={`Run ${viewRun.id} · ${HAZARDS[viewRun.hazard].label} statistics`}
+                stats={viewRun.stats}
+                safePoints={viewRun.safePoints && hourSafePoints}
+                hour={hour}
+                status={runStatus}
+                buttonClassName={btn}
+              />
+            )}
             <span className="ml-auto flex items-baseline gap-4 tabular-nums">
-              {viewRun && (
+              {viewSim && (
                 <span className="text-sm text-zinc-400">
                   {area.toFixed(2)} km² affected
                 </span>
@@ -490,7 +651,7 @@ export function Simulator() {
   );
 }
 
-function Legend({ hazard }: { hazard: Hazard }) {
+function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean }) {
   const items =
     hazard === "wildfire"
       ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
@@ -503,6 +664,12 @@ function Legend({ hazard }: { hazard: Hazard }) {
           {l}
         </span>
       ))}
+      {safePoints && (
+        <span className="flex items-center gap-2">
+          <span className="size-3 rounded-full border-2 border-white bg-emerald-500" />
+          Safe point (evacuation centre)
+        </span>
+      )}
     </div>
   );
 }

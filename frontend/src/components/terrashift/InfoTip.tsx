@@ -1,13 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 const WIDTH = 256;
 const GAP = 6;
 
 /**
  * Small "i" icon that shows a short explanation on hover (or keyboard focus; tap on touch screens).
- * The popover opens diagonally above-right of the icon, fixed-positioned so the scrolling sidebar can't clip it.
+ * The popover opens diagonally above-right of the icon. It's portalled to <body> because the sticky
+ * sidebar is its own stacking context, which would otherwise let the map paint over it.
  */
 export function InfoTip({ label, children }: { label: string; children: React.ReactNode }) {
   const [pos, setPos] = useState<{ left: number; bottom: number } | null>(null);
@@ -71,15 +73,17 @@ export function InfoTip({ label, children }: { label: string; children: React.Re
       >
         i
       </button>
-      {pos && (
-        <span
-          role="tooltip"
-          style={{ left: pos.left, bottom: pos.bottom, width: WIDTH }}
-          className="pointer-events-none fixed z-50 flex flex-col gap-1.5 rounded-lg border border-zinc-600/60 bg-zinc-900/75 p-3 text-xs font-normal normal-case leading-relaxed tracking-normal text-zinc-200 shadow-xl backdrop-blur-sm"
-        >
-          {children}
-        </span>
-      )}
+      {pos &&
+        createPortal(
+          <span
+            role="tooltip"
+            style={{ left: pos.left, bottom: pos.bottom, width: WIDTH }}
+            className="pointer-events-none fixed z-50 flex flex-col gap-1.5 rounded-lg border border-zinc-600/60 bg-zinc-900/75 p-3 text-xs font-normal normal-case leading-relaxed tracking-normal text-zinc-200 shadow-xl backdrop-blur-sm"
+          >
+            {children}
+          </span>,
+          document.body,
+        )}
     </span>
   );
 }

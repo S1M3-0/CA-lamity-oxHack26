@@ -5,7 +5,7 @@
  */
 
 import type { GeoJSONSourceSpecification } from "maplibre-gl";
-import type { Bounds } from "@/lib/sim/types";
+import type { Bounds, Hazard } from "@/lib/sim/types";
 
 export type MapGeoJSON = Exclude<GeoJSONSourceSpecification["data"], string>;
 
@@ -35,6 +35,58 @@ export type FireResult = {
   /** km² affected per frame */
   area: number[];
 };
+
+/** A generated run as stored in Tiger Data. Keep in sync with backend/api/routes/runs.py. */
+export type SavedRun = {
+  id: number;
+  created_at: string;
+  hazard: Hazard;
+  place_name: string;
+  /** [lon, lat] */
+  center: [number, number];
+  params: Record<string, number>;
+  origin: [number, number] | null;
+  seed: number;
+  source: "backend" | "browser";
+  /** edges of the grid the frames were simulated on */
+  bounds: Bounds;
+  w: number;
+  h: number;
+  cell_m: number;
+};
+
+export type RunCreate = Omit<SavedRun, "id" | "created_at"> & {
+  frames_per_hour: number;
+  area_km2: number[];
+  /** burning (fire) or 1 m+ deep (flood) area per frame */
+  active_km2: number[];
+  /** affected cells at each whole hour, base64 bit-packed, row 0 north */
+  hourly_masks: string[];
+};
+
+/** Nearest evacuation centre the hazard never reaches, for one hour and one compass sector. */
+export type SafePoint = {
+  hour: number;
+  /** 0 = north, then clockwise in 45° steps */
+  sector: number;
+  facility_id: number;
+  name: string;
+  kind: string;
+  lon: number;
+  lat: number;
+  /** metres from that hour's affected area */
+  distance_m: number;
+};
+
+export type HourStat = {
+  hour: number;
+  area_km2: number;
+  growth_km2: number;
+  peak_active_km2: number;
+  rain_mm: number;
+};
+
+export type RunStats = { hazard: Hazard; hourly: HourStat[]; summary: Record<string, number> };
 
 export type Item = {
   id: number;
@@ -77,6 +129,13 @@ export const api = {
   fire: {
     la: (data: LaFireRequest) =>
       request<FireResult>("/fire/la", { method: "POST", body: JSON.stringify(data) }),
+  },
+  runs: {
+    list: (limit: number) => request<SavedRun[]>(`/runs?limit=${limit}`),
+    create: (data: RunCreate) => request<SavedRun>("/runs", { method: "POST", body: JSON.stringify(data) }),
+    remove: (id: number) => request<void>(`/runs/${id}`, { method: "DELETE" }),
+    safePoints: (id: number) => request<SafePoint[]>(`/runs/${id}/safe-points`),
+    stats: (id: number) => request<RunStats>(`/runs/${id}/stats`),
   },
   items: {
     list: () => request<Item[]>("/items"),
