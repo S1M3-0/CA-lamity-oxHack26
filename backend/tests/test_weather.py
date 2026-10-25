@@ -1,7 +1,7 @@
 import io
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import patch
 from urllib.error import URLError
 from zoneinfo import ZoneInfo
@@ -18,13 +18,13 @@ from api.routes.runs import RunCreate, _rain_total
 from api.weather import hourly_rain_total
 
 
-def provider_body(offset=0, now=None, zone=None):
+def provider_body(offset=0, now=None, zone=None, target=None):
     zone = zone or ("Pacific/Auckland" if offset else "Europe/London")
     tz = ZoneInfo(zone)
     local_today = (now or datetime.now(timezone.utc)).astimezone(tz).date()
-    day = local_today - timedelta(days=1)
+    day = target or local_today - timedelta(days=1)
     start = int(datetime.combine(day, datetime.min.time(), tz).timestamp())
-    end = int(datetime.combine(local_today, datetime.min.time(), tz).timestamp())
+    end = int(datetime.combine(day + timedelta(days=1), datetime.min.time(), tz).timestamp())
     times = list(range(start, end + 1, 3600))
     n = len(times)
     return {
@@ -89,6 +89,37 @@ class WeatherTests(unittest.TestCase):
             self.assertIn("past_days=2", url)
             self.assertIn("forecast_days=1", url)
             self.assertIn("timeformat=unixtime", url)
+
+    def test_historical_date_uses_archive_rain_without_double_counting_showers(self):
+        selected = date(2020, 10, 25)
+        body = provider_body(target=selected)
+        body["hourly"].pop("showers")
+        with patch.object(weather, "urlopen", return_value=io.StringIO(json.dumps(body))) as get:
+            day = weather.historical_weather(selected, 51.7, -1.2)
+        self.assertEqual(day.date, selected)
+        self.assertEqual(day.dayHours, 25)
+        self.assertEqual(len(day.hours), 24)
+        self.assertAlmostEqual(sum(h.rainfall for h in day.hours), 25 * 0.5)
+        url = get.call_args.args[0]
+        self.assertIn("archive-api.open-meteo.com/v1/archive", url)
+        self.assertIn("start_date=2020-10-25", url)
+        self.assertIn("end_date=2020-10-26", url)
+        self.assertIn("timezone=auto", url)
+        self.assertIn("timeformat=unixtime", url)
+
+    def test_historical_date_rejects_future_and_missing_midnight(self):
+        with self.assertRaises(HTTPException) as caught:
+            weather.historical_weather(date(2100, 1, 1), 51.7, -1.2)
+        self.assertEqual(caught.exception.status_code, 400)
+        selected = date(2020, 6, 1)
+        body = provider_body(target=selected)
+        body["hourly"].pop("showers")
+        for values in body["hourly"].values():
+            values.pop()
+        with patch.object(weather, "urlopen", return_value=io.StringIO(json.dumps(body))):
+            with self.assertRaises(HTTPException) as caught:
+                weather.historical_weather(selected, 51.7, -1.2)
+        self.assertEqual(caught.exception.status_code, 502)
 
     def test_dst_days_preserve_local_date_and_rain_total(self):
         for now, elapsed in ((datetime(2026, 3, 30, 12, tzinfo=timezone.utc), 23),

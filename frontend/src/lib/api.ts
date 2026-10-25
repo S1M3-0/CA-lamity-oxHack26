@@ -150,6 +150,8 @@ export const api = {
   weather: {
     yesterday: (latitude: number, longitude: number, signal?: AbortSignal) =>
       request<WeatherDay>(`/weather/yesterday?latitude=${latitude}&longitude=${longitude}`, { signal }),
+    day: (latitude: number, longitude: number, date: string, signal?: AbortSignal) =>
+      request<WeatherDay>(`/weather/day?latitude=${latitude}&longitude=${longitude}&date=${encodeURIComponent(date)}`, { signal }),
   },
   health: () => request<{ status: string; database: string }>("/health"),
   aoi: {

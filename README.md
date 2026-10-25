@@ -93,17 +93,17 @@ The rasters are too big for git. Put them in `backend/data/maps/`:
 
 Without them, wildfires inside LA fall back to the in-browser model. Floods don't need them.
 
-## Yesterday's weather
+## Past weather
 
-Under **Environmental conditions → Weather source**, select **Yesterday’s weather at this location**. The app fetches yesterday's modelled hourly wind speed, wind direction, relative humidity and liquid rainfall from [Open-Meteo](https://open-meteo.com/en/docs), using the selected place's coordinates and local timezone. No API key is needed for the public API.
+Under **Environmental conditions → Weather source**, select **Yesterday’s weather at this location** or **Choose a past weather date**. For an earlier date, use the date picker. The browser calls the FastAPI backend on Vultr through `/api/*`; the backend requests modelled hourly wind speed, wind direction, relative humidity and liquid rainfall from [Open-Meteo](https://open-meteo.com/en/docs/historical-weather-api), using the selected place's coordinates and local timezone. The public API needs no key for non-commercial use. Yesterday uses Open-Meteo's Forecast API; selected past dates use its Historical Weather API.
 
-The simulation starts at local 00:00. Wildfire uses each hour's wind and humidity; floods use each hour's rain instead of the manual storm shape. Rain and showers are combined, with preceding-hour totals aligned to the correct simulation interval. Snowfall is excluded. Soil saturation remains a manual starting condition. Imported weather is modelled data, not station observations; choosing it does not detect whether a real disaster occurred.
+The simulation starts at local 00:00 on the chosen date. Wildfire uses each hour's wind and humidity; floods use each hour's rain instead of the manual storm shape. Forecast API rain and showers are combined; Historical Weather API rain already includes showers. Preceding-hour totals are aligned to the correct simulation interval. Snowfall is excluded. Soil saturation remains a manual starting condition. Imported weather is modelled data, not station observations; choosing it does not detect whether a real disaster occurred.
 
-The timeline shows the date, timezone and hourly conditions. UTC timestamps are converted to the place's timezone to identify yesterday correctly across daylight-saving changes. On a 25-hour day, repeated clock hours are combined; on a 23-hour day, the skipped hour carries nearby wind and humidity with zero rain. The UI explains this normalization to the 24-hour timeline, and the day's rain total is preserved. Changing location reloads weather. If the provider fails or returns missing hours, generation waits until you retry or choose manual conditions. Selecting manual restores the adjustable sliders.
+The timeline shows the date, timezone and hourly conditions. UTC timestamps are converted to the place's timezone across daylight-saving changes. On a 25-hour day, repeated clock hours are combined; on a 23-hour day, the skipped hour carries nearby wind and humidity with zero rain. The UI explains this normalization to the 24-hour timeline, and the day's rain total is preserved. Changing location or date reloads weather. If the provider fails or returns missing hours, generation waits until you retry or choose manual conditions. Selecting manual restores the adjustable sliders.
 
 Saved wildfire and flood runs include their weather profile in the existing JSON parameters, so replay uses the original hourly data without fetching a different day or changing the database schema. Loading a saved scenario labels its original weather date explicitly.
 
-The backend endpoint is `GET /api/weather/yesterday?latitude=51.745&longitude=-1.255`. Run `npm run test:weather --workspace frontend` for the browser weather tests and, from `backend/` with its virtual environment active, `python -m unittest discover -s tests -v` for the backend checks.
+The backend endpoints are `GET /api/weather/yesterday?latitude=51.745&longitude=-1.255` and `GET /api/weather/day?latitude=51.745&longitude=-1.255&date=2024-07-01`. The selected date must be before today at that location and no earlier than 1940. Run `npm run test:weather --workspace frontend` for the browser weather tests and, from `backend/` with its virtual environment active, `python -m unittest discover -s tests -v` for the backend checks.
 
 ## Deploying
 
