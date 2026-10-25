@@ -3,8 +3,8 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { api, type MapGeoJSON } from "@/lib/api";
-import { cellToLngLat, renderFrame, type Hazard, type LngLat, type ResidentialAlert, type Terrain } from "@/lib/sim";
+import { api, type MapGeoJSON, type SafePoint } from "@/lib/api";
+import { cellToLngLat, compass, renderFrame, type Hazard, type LngLat, type ResidentialAlert, type Terrain } from "@/lib/sim";
 
 export type Basemap = "satellite" | "streets";
 type Props = {
@@ -15,6 +15,8 @@ type Props = {
   frame: Uint8Array | null;
   residentialAlerts: ResidentialAlert[];
   origin: LngLat | null;
+  /** evacuation centres to pin for the hour being shown */
+  safePoints: SafePoint[];
   basemap: Basemap;
   terrain3d: boolean;
   onMapClick?: (lngLat: LngLat) => void;
@@ -96,6 +98,7 @@ export function SimMap(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const markersRef = useRef<Marker[]>([]);
   const warningMarkersRef = useRef(new Map<string, Marker>());
+  const safeMarkersRef = useRef<Marker[]>([]);
   const fittedKeyRef = useRef<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -201,6 +204,18 @@ export function SimMap(props: Props) {
     }
   }
 
+  function applySafePoints() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib) return;
+    safeMarkersRef.current.forEach((m) => m.remove());
+    safeMarkersRef.current = propsRef.current.safePoints.map((p) => {
+      const el = markerEl("size-3.5 cursor-help rounded-full border-2 border-white bg-emerald-500 shadow-lg");
+      el.title = `${p.name} (${p.kind.replace("_", " ")}) · ${compass(p.sector * 45)} side · ${(p.distance_m / 1000).toFixed(1)} km from the edge`;
+      return new lib.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(map);
+    });
+  }
+
   function applyStyleToggles() {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
@@ -260,6 +275,7 @@ export function SimMap(props: Props) {
     applyAoi();
     applyMarkers();
     applyWarnings();
+    applySafePoints();
     applyStyleToggles();
   }
 
@@ -300,6 +316,7 @@ export function SimMap(props: Props) {
   useEffect(applyCamera, [props.terrain, props.center]);
   useEffect(applyMarkers, [props.origin, props.hazard]);
   useEffect(applyWarnings, [props.terrain, props.hazard, props.residentialAlerts]);
+  useEffect(applySafePoints, [props.safePoints]);
   useEffect(applyStyleToggles, [props.basemap, props.terrain3d]);
 
   return (

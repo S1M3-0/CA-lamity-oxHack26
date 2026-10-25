@@ -8,11 +8,12 @@ function terrain(size = 100): Terrain {
     key: "test", name: "Test", center: [0, 40], w: size, h: size, cellM: 120,
     bounds: { west: -1, east: 1, south: 39, north: 41 },
     elev: new Float32Array(size * size), fuel: new Float32Array(size * size),
+    water: new Uint8Array(size * size), runoff: new Float32Array(size * size),
     sea: new Uint8Array(size * size), demSource: "synthetic", fuelSource: "uniform",
     minElev: 0, maxElev: 0,
   };
 }
-const params: Params = { windDir: 270, windSpeed: 20, humidity: 30, rainfall: 50, saturation: 40 };
+const params: Params = { windDir: 270, windSpeed: 20, humidity: 30, rainfall: 50, stormHours: 24, saturation: 40 };
 
 function centroid(frame: Uint8Array, w: number) {
   let x = 0, y = 0, count = 0;

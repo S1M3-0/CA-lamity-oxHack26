@@ -21,6 +21,10 @@ export type Terrain = {
   sea: Uint8Array;
   /** Estimated residential cells from OSM map colours; absent when those tiles are unavailable. */
   residential?: Uint8Array;
+  /** 1 = mapped river or lake (OpenStreetMap), carved in as a flood channel. */
+  water: Uint8Array;
+  /** 0..1 share of rain that runs off dry ground (pavement high, forest low). */
+  runoff: Float32Array;
   demSource: "terrarium" | "synthetic";
   /** landcover = OpenStreetMap land use, with imagery filling unmapped land */
   fuelSource: "landcover" | "imagery" | "uniform";
@@ -35,8 +39,10 @@ export type Params = {
   windDir: number;
   /** % */
   humidity: number;
-  /** mm/h */
+  /** mm/h, averaged over the storm */
   rainfall: number;
+  /** how long the storm lasts, hours */
+  stormHours: number;
   /** % */
   saturation: number;
 };
@@ -44,7 +50,7 @@ export type Params = {
 /**
  * Per-frame cell values (0 = unaffected). Meaning per hazard:
  *  wildfire: 255 burning, 110 burnt
- *  flood: 40..255 scaled water depth
+ *  flood: 40..255 scaled water depth; 1..39 water inside a river channel (not flooding)
  *  hurricane: 40..255 relative storm intensity; the eye is transparent
  */
 export type SimResult = {
@@ -60,3 +66,5 @@ export type SimResult = {
 export const HOURS = 24;
 export const FRAMES_PER_HOUR = 4;
 export const FRAME_COUNT = HOURS * FRAMES_PER_HOUR + 1;
+/** Flood frame values below this are river water inside its channel, not flooding. */
+export const FLOOD_MIN = 40;

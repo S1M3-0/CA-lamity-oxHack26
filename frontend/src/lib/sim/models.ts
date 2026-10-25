@@ -105,6 +105,7 @@ export function simulateWildfire(t: Terrain, p: Params, origin: number, seed: nu
 }
 
 /**
+ * Fallback when the backend's river-routing flood model (backend/flood.py) can't be reached.
  * Shallow-water style flood: rainfall minus infiltration falls on every cell and water
  * moves toward lower water surfaces.
  */
@@ -135,7 +136,8 @@ export function simulateFlood(t: Terrain, p: Params): SimResult {
     for (let s = 0; s < STEPS_PER_FRAME; s++) {
       const tH = (fi - 1) / FRAMES_PER_HOUR + s * dtH;
       const infil = 25 * (1 - sat) * Math.exp(-tH / 4);
-      const runoff = (Math.max(0, p.rainfall - infil) / 1000) * dtH;
+      const rain = tH < p.stormHours ? p.rainfall : 0;
+      const runoff = (Math.max(0, rain - infil) / 1000) * dtH;
       for (let k = 0; k < N; k++) if (!sea[k]) depth[k] += runoff;
 
       delta.fill(0);
