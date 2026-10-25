@@ -4,7 +4,7 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { api, type MapGeoJSON } from "@/lib/api";
-import { renderFrame, type Hazard, type LngLat, type Terrain } from "@/lib/sim";
+import { cellToLngLat, renderFrame, type Hazard, type LngLat, type ResidentialAlert, type Terrain } from "@/lib/sim";
 
 export type Basemap = "satellite" | "streets";
 type Props = {
@@ -13,6 +13,7 @@ type Props = {
   terrain: Terrain | null;
   hazard: Hazard | null;
   frame: Uint8Array | null;
+  residentialAlerts: ResidentialAlert[];
   origin: LngLat | null;
   basemap: Basemap;
   terrain3d: boolean;
@@ -94,6 +95,7 @@ export function SimMap(props: Props) {
   const loadedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const markersRef = useRef<Marker[]>([]);
+  const warningMarkersRef = useRef(new Map<string, Marker>());
   const fittedKeyRef = useRef<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -147,6 +149,7 @@ export function SimMap(props: Props) {
       cancelled = true;
       ro?.disconnect();
       mapRef.current?.remove();
+      warningMarkersRef.current.clear();
       mapRef.current = null;
       loadedRef.current = false;
     };
@@ -189,9 +192,11 @@ export function SimMap(props: Props) {
     if (!map || !lib) return;
     markersRef.current.forEach((m) => m.remove());
     markersRef.current = [];
-    const { origin } = propsRef.current;
+    const { origin, hazard } = propsRef.current;
     if (origin) {
-      const cls = "size-4 rounded-full border-2 border-white bg-orange-500 shadow-lg";
+      const cls = hazard === "hurricane"
+        ? "size-4 rounded-full border-2 border-white bg-violet-500 shadow-lg"
+        : "size-4 rounded-full border-2 border-white bg-orange-500 shadow-lg";
       markersRef.current.push(new lib.Marker({ element: markerEl(cls) }).setLngLat(origin).addTo(map));
     }
   }
@@ -214,11 +219,47 @@ export function SimMap(props: Props) {
     }
   }
 
+  function applyWarnings() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib || !loadedRef.current) return;
+    const { terrain, hazard, residentialAlerts } = propsRef.current;
+    const alerts = terrain && hazard === "hurricane" ? residentialAlerts : [];
+    const ids = new Set(alerts.map((alert) => alert.id));
+    for (const [id, marker] of warningMarkersRef.current) {
+      if (!ids.has(id)) {
+        marker.remove();
+        warningMarkersRef.current.delete(id);
+      }
+    }
+    for (const alert of alerts) {
+      let marker = warningMarkersRef.current.get(alert.id);
+      if (!marker) {
+        const el = markerEl("flex size-8 items-center justify-center rounded-lg border bg-zinc-950/90 text-2xl shadow-lg", "⚠");
+        el.setAttribute("role", "img");
+        el.tabIndex = 0;
+        el.addEventListener("click", (event) => event.stopPropagation());
+        marker = new lib.Marker({ element: el }).setLngLat(cellToLngLat(terrain!, alert.cell)).addTo(map);
+        warningMarkersRef.current.set(alert.id, marker);
+      }
+      marker.setLngLat(cellToLngLat(terrain!, alert.cell));
+      const el = marker.getElement();
+      for (const className of ["border-red-400", "text-red-400"]) el.classList.toggle(className, alert.status === "active");
+      for (const className of ["border-amber-300", "text-amber-300"]) el.classList.toggle(className, alert.status === "upcoming");
+      const description = alert.status === "active"
+        ? "Estimated residential area: hurricane cells affecting this area in the simulation"
+        : `Estimated residential area: hurricane expected in ${alert.hoursUntil.toFixed(2)} hours in the simulation`;
+      el.title = description;
+      el.setAttribute("aria-label", description);
+    }
+  }
+
   function applyAll() {
     applyCamera();
     applyOverlay();
     applyAoi();
     applyMarkers();
+    applyWarnings();
     applyStyleToggles();
   }
 
@@ -258,6 +299,7 @@ export function SimMap(props: Props) {
   useEffect(applyOverlay, [props.terrain, props.hazard, props.frame]);
   useEffect(applyCamera, [props.terrain, props.center]);
   useEffect(applyMarkers, [props.origin, props.hazard]);
+  useEffect(applyWarnings, [props.terrain, props.hazard, props.residentialAlerts]);
   useEffect(applyStyleToggles, [props.basemap, props.terrain3d]);
 
   return (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_PARAMS,
   FRAMES_PER_HOUR,
@@ -8,12 +8,15 @@ import {
   HOURS,
   PARAM_META,
   backendCoversFire,
+  buildResidentialWarnings,
   compass,
   describeParams,
   loadTerrain,
+  lngLatToCell,
   runBackendWildfire,
   runSeed,
   runSimulation,
+  residentialAlertsAtFrame,
   terrainKey,
   type Hazard,
   type LngLat,
@@ -50,7 +53,7 @@ const PRESETS: Place[] = [
   { name: "Topanga, LA", center: [-118.6, 34.1] },
 ];
 
-const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop" };
+const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop", hurricane: "hurricane" };
 const RUN_COLORS = ["#f97316", "#38bdf8", "#a3e635", "#e879f9", "#facc15", "#f87171"];
 const SPEEDS = [0.5, 1, 2, 4];
 const MAX_RUNS = 6;
@@ -91,6 +94,14 @@ export function Simulator() {
   const meta = HAZARDS[hazard];
   const missingOrigin = meta.originLabel !== null && origin === null;
   const useBackend = hazard === "wildfire" && terrain !== null && backendCoversFire(terrain);
+  const residentialWarnings = useMemo(
+    () => viewRun?.hazard === "hurricane" ? buildResidentialWarnings(viewRun.grid, viewRun.result) : [],
+    [viewRun],
+  );
+  const residentialAlerts = useMemo(
+    () => residentialAlertsAtFrame(residentialWarnings, frameIdx),
+    [residentialWarnings, frameIdx],
+  );
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -258,6 +269,13 @@ export function Simulator() {
                   <span><b className="text-zinc-100">Humidity:</b> damper air slows the fire. Above about 80% it barely spreads.</span>
                   <span>Fires also spread faster uphill.</span>
                 </>
+              ) : hazard === "hurricane" ? (
+                <>
+                  <span><b className="text-zinc-100">Wind speed:</b> controls how fast the storm travels. Travel is scaled to 1% of this speed for the local map.</span>
+                  <span><b className="text-zinc-100">Wind direction:</b> where the wind comes from. The storm follows the arrow with a deviation of up to 15° either side.</span>
+                  <span>The storm starts small, grows around a calm eye, then breaks up and dissipates. Neighbouring cells can form or die, creating patchy bands.</span>
+                  <span>Warning signs mark estimated residential areas in this simulated path: amber ahead of arrival, red while affected. They clear once the forecast storm cells pass.</span>
+                </>
               ) : (
                 <>
                   <span><b className="text-zinc-100">Rainfall:</b> how hard it rains over the whole area. Some soaks in; the rest flows downhill and pools in low ground.</span>
@@ -305,7 +323,7 @@ export function Simulator() {
                     <InfoTip label={meta.originLabel}>
                       <span>
                         Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
-                        the fire starts</b>, and it spreads outward from there.
+                        {hazard === "hurricane" ? "the storm starts" : "the fire starts"}</b>, {hazard === "hurricane" ? "then it grows and travels with the wind." : "and it spreads outward from there."}
                       </span>
                       <span>Click somewhere else to move it, or press × to clear it.</span>
                     </InfoTip>
@@ -313,7 +331,7 @@ export function Simulator() {
                   <span className={`block text-xs ${origin ? "text-zinc-500" : "text-amber-400"}`}>
                     {origin
                       ? `Starts at ${origin[1].toFixed(4)}, ${origin[0].toFixed(4)}`
-                      : "Required · click the map where the fire starts"}
+                      : `Required · click the map where the ${hazard === "hurricane" ? "storm" : "fire"} starts`}
                   </span>
                 </span>
               </span>
@@ -414,12 +432,23 @@ export function Simulator() {
             center={place.center}
             showLaAoi={place.name === "Los Angeles"}
             terrain={viewRun?.grid ?? terrain}
-            hazard={viewRun?.hazard ?? null}
+            hazard={viewRun?.hazard ?? hazard}
             frame={viewRun?.result.frames[frameIdx] ?? null}
+            residentialAlerts={residentialAlerts}
             origin={meta.originLabel ? (viewRun ? viewRun.origin : origin) : null}
             basemap={basemap}
             terrain3d={terrain3d}
-            onMapClick={(ll) => meta.originLabel && setOrigin(ll)}
+            onMapClick={(ll) => {
+              if (!meta.originLabel) return;
+              if (terrain && lngLatToCell(terrain, ll) < 0) {
+                setSimNote("Choose a starting point inside the loaded 12 km simulation area.");
+                return;
+              }
+              setSimNote(null);
+              setPlaying(false);
+              setActiveId(null);
+              setOrigin(ll);
+            }}
             badge={viewRun ? { text: `Run ${viewRun.id} · ${formatT(t)}`, color: RUN_COLORS[viewRun.id % RUN_COLORS.length] } : null}
           />
           {computing && (
@@ -428,6 +457,13 @@ export function Simulator() {
             </div>
           )}
           {viewRun && <Legend hazard={viewRun.hazard} />}
+          {viewRun?.hazard === "hurricane" && (
+            <div className="pointer-events-none absolute left-3 top-12 z-10 max-w-xs rounded-lg bg-zinc-950/85 px-3 py-2 text-xs text-amber-200 backdrop-blur" role="status">
+              {viewRun.grid.residential
+                ? `${residentialAlerts.length} residential areas in the remaining simulated path · estimated from OSM`
+                : "Residential map unavailable · warning signs are hidden"}
+            </div>
+          )}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3">
@@ -494,6 +530,8 @@ function Legend({ hazard }: { hazard: Hazard }) {
   const items =
     hazard === "wildfire"
       ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
+      : hazard === "hurricane"
+      ? [["#784beb", "Outer storm bands"], ["#dccdff", "Intense storm cells"], ["#27272a", "Calm eye (clear)"], ["#fbbf24", "⚠ Residential area ahead"], ["#f87171", "⚠ Residential area affected"]]
       : [["#5abeff", "Shallow (0.15 m+)"], ["#0a46d7", "Deep (2.5 m+)"]];
   return (
     <div className="pointer-events-none absolute bottom-8 right-3 z-10 flex flex-col gap-1 rounded-lg bg-zinc-950/80 px-3 py-2 text-xs text-zinc-200 backdrop-blur">

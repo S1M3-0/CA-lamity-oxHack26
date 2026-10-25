@@ -1,5 +1,7 @@
 # Hackathon App
 
+See the [architecture diagram](docs/architecture.md) for the frontend, backend, simulation engines, map data, and database connections.
+
 Next.js (App Router) + Tailwind CSS v4 frontend, FastAPI backend, Postgres (Neon) on Vercel — one repo, two folders, two Vercel projects.
 
 ```
@@ -47,6 +49,16 @@ MapLibre is already used by `frontend/src/components/terrashift/SimMap.tsx` for 
 3. In the app, select **Los Angeles**. The client fetches `/api/aoi/la` through the existing Next.js rewrite, then adds a blue GeoJSON fill and outline to MapLibre. The map displays an API error if loading fails.
 
 For deployment, set `API_URL` on the frontend Vercel project as described below. The browser uses the same `/api/aoi/la` path in both environments, so no browser CORS configuration or client-side backend URL is needed.
+
+## Hurricane simulation
+
+Select **Hurricane**, set the wind speed and direction, click the map to set the storm origin, then press **Generate simulation**. The browser runs a cellular automaton with Life-inspired neighbour birth and death rules: storm cells form patchy rotating bands around a calm eye, break apart, then dissipate late in the run. The storm travels downwind (following the arrow; the direction slider says where wind comes **from**) with a repeatable deviation bounded by ±15°.
+
+Size and movement are illustrative and scaled to the 12 km map: storm travel uses 1% of the selected wind speed, and its radius grows before shrinking and fading over the 24-hour timeline. Cells also disappear as the storm leaves the simulated area. Purple shading shows relative storm intensity.
+
+Warning signs group estimated residential cells into kilometre-sized areas wherever the simulated storm reaches them. Amber means arrival is ahead; red means the area is currently affected. Hover or focus a sign for details. Signs clear once the last forecast cells pass, and follow the timeline when rewinding. Residential estimates use the existing OSM tile colour sampling; if those tiles fail to load, warnings are hidden and the map reports that residential data is unavailable.
+
+Run `npm run test:hurricane --workspace frontend` for the model checks.
 
 ## Deploy to Vercel
 

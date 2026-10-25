@@ -1,4 +1,5 @@
 import { simulateFlood, simulateWildfire } from "./models";
+import { simulateHurricane } from "./hurricane";
 import { hashString } from "./rng";
 import { lngLatToCell } from "./terrain";
 import { type Hazard, type LngLat, type Params, type SimResult, type Terrain } from "./types";
@@ -6,6 +7,7 @@ import { type Hazard, type LngLat, type Params, type SimResult, type Terrain } f
 export * from "./types";
 export { loadTerrain, lngLatToCell, cellToLngLat, terrainKey } from "./terrain";
 export { backendCoversFire, runBackendWildfire } from "./backend";
+export { buildResidentialWarnings, residentialAlertsAtFrame, type ResidentialAlert } from "./residential-warnings";
 
 export type ParamKey = keyof Params;
 
@@ -24,6 +26,12 @@ export const HAZARDS: Record<
     params: ["rainfall", "saturation"],
     originLabel: null,
     blurb: "Rain-on-grid runoff over real elevation.",
+  },
+  hurricane: {
+    label: "Hurricane",
+    params: ["windSpeed", "windDir"],
+    originLabel: "Storm origin",
+    blurb: "Storm cells grow, break apart and dissipate while following the wind within ±15°. Size and travel are scaled to this local map.",
   },
 };
 
@@ -51,6 +59,8 @@ export function compass(deg: number) {
 }
 
 export function describeParams(hazard: Hazard, p: Params) {
+  if (hazard === "hurricane")
+    return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ±15° storm track`;
   if (hazard === "wildfire")
     return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ${p.humidity}% RH`;
   return `${p.rainfall} mm/h rain · ${p.saturation}% soil`;
@@ -68,9 +78,9 @@ export function runSimulation(
 ): SimResult {
   const seed = runSeed(hazard, t, p, origin);
   const originCell = origin ? lngLatToCell(t, origin) : -1;
-  if (hazard === "wildfire") {
+  if (hazard === "wildfire" || hazard === "hurricane") {
     const start = originCell >= 0 ? originCell : (t.h >> 1) * t.w + (t.w >> 1);
-    return simulateWildfire(t, p, start, seed);
+    return hazard === "hurricane" ? simulateHurricane(t, p, start, seed) : simulateWildfire(t, p, start, seed);
   }
   return simulateFlood(t, p);
 }
@@ -96,6 +106,9 @@ export function renderFrame(
       if (hazard === "wildfire") {
         if (v === 255) { px[o] = 255; px[o + 1] = 120 + ((k * 7) % 60); px[o + 2] = 20; px[o + 3] = 240; }
         else { px[o] = 55; px[o + 1] = 18; px[o + 2] = 12; px[o + 3] = 175; }
+      } else if (hazard === "hurricane") {
+        const a = (v - 40) / 215;
+        px[o] = 120 + 120 * a; px[o + 1] = 75 + 155 * a; px[o + 2] = 235 + 20 * a; px[o + 3] = 60 + 195 * a;
       } else {
         const a = (v - 40) / 215;
         px[o] = 90 - 80 * a; px[o + 1] = 190 - 120 * a; px[o + 2] = 255 - 40 * a; px[o + 3] = 120 + 120 * a;

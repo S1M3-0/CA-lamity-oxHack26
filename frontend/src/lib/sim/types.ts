@@ -1,4 +1,4 @@
-export type Hazard = "wildfire" | "flood";
+export type Hazard = "wildfire" | "flood" | "hurricane";
 
 /** [longitude, latitude] */
 export type LngLat = [number, number];
@@ -19,6 +19,8 @@ export type Terrain = {
   fuel: Float32Array;
   /** 1 = sea level or below (acts as a sink for floods). */
   sea: Uint8Array;
+  /** Estimated residential cells from OSM map colours; absent when those tiles are unavailable. */
+  residential?: Uint8Array;
   demSource: "terrarium" | "synthetic";
   /** landcover = OpenStreetMap land use, with imagery filling unmapped land */
   fuelSource: "landcover" | "imagery" | "uniform";
@@ -43,6 +45,7 @@ export type Params = {
  * Per-frame cell values (0 = unaffected). Meaning per hazard:
  *  wildfire: 255 burning, 110 burnt
  *  flood: 40..255 scaled water depth
+ *  hurricane: 40..255 relative storm intensity; the eye is transparent
  */
 export type SimResult = {
   frames: Uint8Array[];
@@ -50,6 +53,8 @@ export type SimResult = {
   arrival: Float32Array;
   /** km² affected per frame */
   area: number[];
+  /** Hurricane eye position in grid coordinates for each frame, including outside the map. */
+  stormTrack?: { col: number; row: number }[];
 };
 
 export const HOURS = 24;
