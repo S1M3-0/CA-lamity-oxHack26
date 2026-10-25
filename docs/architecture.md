@@ -30,7 +30,7 @@ flowchart TB
         grid["POST /api/fire/simulate<br/>Caller-supplied grids; no current UI caller"]
         items["/api/items CRUD<br/>Placeholder feature"]
         health["GET /api/health<br/>Status and database dialect"]
-        weather["GET /api/weather/yesterday<br/>Validate 24 hourly conditions and align rainfall"]
+        weather["GET /api/weather/yesterday or /day<br/>Validate 24 hourly conditions and align rainfall"]
         flood["POST /api/flood/simulate<br/>River routing with hourly or manual rainfall"]
         runs["/api/runs<br/>Save and restore profiles, statistics and safe points"]
         orm["SQLModel / SQLAlchemy<br/>Item model and sessions"]
@@ -45,7 +45,7 @@ flowchart TB
     end
 
     tiles["External tile services<br/>Esri imagery and labels<br/>OSM map tiles<br/>AWS Terrarium elevation tiles"]
-    meteo["Open-Meteo<br/>Yesterday's modelled weather in the location's timezone"]
+    meteo["Open-Meteo<br/>Past modelled weather in the location's timezone"]
 
     user --> ui
     next --> ui
@@ -98,7 +98,7 @@ flowchart TB
 3. `fire_maps.py` loads cached grids or resamples the local elevation and land-cover GeoTIFFs. `CA.py` derives fuel from land cover and computes fire spread using humidity, wind and elevation slope.
 4. FastAPI returns base64 byte frames and grid metadata as JSON, with GZip for sufficiently large responses. The browser decodes the frames into `Uint8Array`s, calculates first-arrival times and renders playback using a canvas overlay on MapLibre.
 5. Floods send the browser's terrain grid to `/api/flood/simulate` for Python river routing. Wildfire outside backend coverage runs in browser models. If a simulation API call fails, the UI reports it and uses the corresponding browser model.
-6. Choosing yesterday's weather fetches `/api/weather/yesterday` using the selected coordinates. The hourly wind and humidity drive wildfire; liquid rainfall drives floods. Soil saturation remains manual. Profiles are saved with wildfire and flood scenarios under the existing JSON parameters, so replay uses the same conditions.
+6. Choosing yesterday's weather fetches `/api/weather/yesterday`; choosing a past date fetches `/api/weather/day` using the selected date and coordinates. The hourly wind and humidity drive wildfire; liquid rainfall drives floods. Soil saturation remains manual. Profiles are saved with wildfire and flood scenarios under the existing JSON parameters, so replay uses the same conditions.
 
 ## Supporting features and deployment
 

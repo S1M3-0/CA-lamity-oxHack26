@@ -76,6 +76,11 @@ const RUN_COLORS = ["#f97316", "#38bdf8", "#a3e635", "#e879f9", "#facc15", "#f87
 const SPEEDS = [0.5, 1, 2, 4];
 const MAX_RUNS = 6;
 
+function defaultPastDate() {
+  // Two UTC days ago is already past at every supported longitude.
+  return new Date(Date.now() - 2 * 86400000).toISOString().slice(0, 10);
+}
+
 const errorText = (e: unknown) => (e instanceof Error ? e.message : "request failed");
 
 function fromSaved(s: SavedRun, id: number): Run {
@@ -131,7 +136,8 @@ export function Simulator() {
   const [terrainError, setTerrainError] = useState<string | null>(null);
   const [hazard, setHazard] = useState<Hazard>("wildfire");
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
-  const [weatherMode, setWeatherMode] = useState<"manual" | "yesterday" | "saved">("manual");
+  const [weatherMode, setWeatherMode] = useState<"manual" | "yesterday" | "historical" | "saved">("manual");
+  const [weatherDate, setWeatherDate] = useState(defaultPastDate);
   const [weather, setWeather] = useState<WeatherDay | null>(null);
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [weatherError, setWeatherError] = useState<string | null>(null);
@@ -157,9 +163,10 @@ export function Simulator() {
   const key = terrainKey(place.center);
   const terrain = terrains[key] ?? null;
   const weatherMatchesPlace = weather?.latitude === place.center[1] && weather?.longitude === place.center[0];
-  /** Yesterday's (or a loaded scenario's) hourly weather drives wildfires only; floods always use the manual sliders. */
+  const weatherMatchesSelection = weatherMode !== "historical" || weather?.date === weatherDate;
+  /** Hourly weather (yesterday's, a past date's or a loaded scenario's) drives wildfires only; floods always use the manual sliders. */
   const weatherOn = hazard === "wildfire" && weatherMode !== "manual";
-  const weatherReady = !weatherOn || (weatherMatchesPlace && !weatherLoading && !weatherError);
+  const weatherReady = !weatherOn || (weatherMatchesPlace && weatherMatchesSelection && !weatherLoading && !weatherError);
   const simulationParams: Params = weatherOn && weatherMatchesPlace && weather
     ? { ...params, weather }
     : params;
@@ -178,17 +185,20 @@ export function Simulator() {
   const useBackend = hazard === "flood" || (hazard === "wildfire" && terrain !== null && backendCoversFire(terrain));
 
   useEffect(() => {
-    if (hazard !== "wildfire" || weatherMode !== "yesterday") return;
+    if (hazard !== "wildfire" || (weatherMode !== "yesterday" && weatherMode !== "historical")) return;
     const controller = new AbortController();
     setWeather(null);
     setWeatherLoading(true);
     setWeatherError(null);
-    api.weather.yesterday(place.center[1], place.center[0], controller.signal)
+    const fetchDay = weatherMode === "historical"
+      ? api.weather.day(place.center[1], place.center[0], weatherDate, controller.signal)
+      : api.weather.yesterday(place.center[1], place.center[0], controller.signal);
+    fetchDay
       .then((day) => { if (!controller.signal.aborted) setWeather(day); })
       .catch((e) => { if (!controller.signal.aborted) setWeatherError(errorText(e)); })
       .finally(() => { if (!controller.signal.aborted) setWeatherLoading(false); });
     return () => controller.abort();
-  }, [hazard, weatherMode, place.center[0], place.center[1], weatherReload]);
+  }, [hazard, weatherMode, weatherDate, place.center[0], place.center[1], weatherReload]);
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -496,7 +506,7 @@ export function Simulator() {
                 value={weatherMode}
                 onChange={(e) => {
                   touched.current = true;
-                  setWeatherMode(e.target.value as "manual" | "yesterday" | "saved");
+                  setWeatherMode(e.target.value as "manual" | "yesterday" | "historical" | "saved");
                   setWeatherError(null);
                   setWeatherLoading(false);
                 }}
@@ -504,13 +514,22 @@ export function Simulator() {
               >
                 <option value="manual">Manual conditions</option>
                 <option value="yesterday">Yesterday’s weather at this location</option>
+                <option value="historical">Choose a past weather date</option>
                 {weatherMode === "saved" && <option value="saved">Loaded scenario’s hourly weather</option>}
               </select>
             </label>
           )}
+          {weatherOn && weatherMode === "historical" && (
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="font-medium">Weather date at this location</span>
+              <input type="date" min="1940-01-01" max={new Date().toISOString().slice(0, 10)} value={weatherDate}
+                onChange={(e) => setWeatherDate(e.target.value)}
+                className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100" />
+            </label>
+          )}
           {weatherOn && (
             <div className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-200" aria-live="polite">
-              {weatherLoading || (!weather && !weatherError) ? <p>Loading yesterday’s hourly weather for {place.name}…</p> : weatherError ? (
+              {weatherLoading || (!weather && !weatherError) ? <p>Loading hourly weather for {place.name}…</p> : weatherError ? (
                 <>
                   <p role="alert">{weatherError}</p>
                   <button type="button" className={btn} onClick={() => setWeatherReload((n) => n + 1)}>Retry weather</button>
