@@ -50,7 +50,7 @@ export function ItemsPanel() {
         />
         <button
           type="submit"
-          className="rounded-lg bg-brand px-4 py-2 font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+          className="rounded-lg bg-brand px-4 py-2 font-medium text-on-brand hover:bg-brand-hover disabled:opacity-50"
           disabled={!title.trim()}
         >
           Add

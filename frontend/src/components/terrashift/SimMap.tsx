@@ -205,7 +205,12 @@ export function SimMap(props: Props) {
     if (!map || !lib) return;
     safeMarkersRef.current.forEach((m) => m.remove());
     safeMarkersRef.current = propsRef.current.safePoints.map((p) => {
-      const el = markerEl("size-3.5 cursor-help rounded-full border-2 border-white bg-emerald-500 shadow-lg");
+      // dark green disc, thick white rim and a halo so it reads on any imagery, with a house glyph
+      const el = markerEl(
+        "flex size-7 cursor-help items-center justify-center rounded-full border-[3px] border-white bg-safe shadow-[0_0_0_3px_rgba(47,122,31,0.5),0_3px_10px_rgba(0,0,0,0.7)]",
+      );
+      el.innerHTML =
+        '<svg viewBox="0 0 24 24" class="size-3.5" fill="white" aria-hidden="true"><path d="M12 3 2.5 11.5H5.5V20h5v-5.5h3V20h5v-8.5h3z"/></svg>';
       el.title = `${p.name} (${p.kind.replace("_", " ")}) · ${compass(p.sector * 45)} side · ${(p.distance_m / 1000).toFixed(1)} km from the edge`;
       return new lib.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(map);
     });
@@ -282,12 +287,12 @@ export function SimMap(props: Props) {
       {/* inline: maplibre-gl.css sets .maplibregl-map to position:relative and beats Tailwind's layered classes */}
       <div ref={containerRef} className="absolute inset-0" style={{ position: "absolute", inset: 0 }} />
       {props.showLaAoi && aoiStatus && (
-        <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[min(32rem,calc(100%-1.5rem))] rounded-lg bg-zinc-950/85 px-3 py-1.5 text-xs text-zinc-100 shadow backdrop-blur" role="status">
+        <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[min(32rem,calc(100%-1.5rem))] rounded-lg bg-zinc-900/85 px-3 py-1.5 text-xs text-zinc-100 shadow backdrop-blur" role="status">
           {aoiStatus === "ready" ? "LA AOI · loaded from API" : aoiStatus === "loading" ? "Loading LA AOI…" : `LA AOI: ${aoiError}`}
         </div>
       )}
       {props.badge && (
-        <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg bg-zinc-950/80 px-3 py-1.5 text-sm font-medium text-zinc-100 shadow backdrop-blur">
+        <div className="pointer-events-none absolute left-3 top-3 z-10 flex items-center gap-2 rounded-lg bg-zinc-900/80 px-3 py-1.5 text-sm font-medium text-zinc-100 shadow backdrop-blur">
           <span className="size-2.5 rounded-full" style={{ background: props.badge.color }} />
           {props.badge.text}
         </div>

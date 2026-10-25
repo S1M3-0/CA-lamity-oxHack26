@@ -341,7 +341,7 @@ export function Simulator() {
                 onClick={() => changePlace(p)}
                 className={`rounded-lg border px-2 py-2 text-sm ${
                   place.name === p.name
-                    ? "border-brand bg-brand/20 text-white"
+                    ? "border-brand bg-brand/20 text-zinc-100"
                     : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
                 }`}
               >
@@ -371,7 +371,7 @@ export function Simulator() {
                 onClick={() => setHazard(h)}
                 className={`flex flex-col items-center gap-1 rounded-lg border px-2 py-2.5 text-sm ${
                   hazard === h
-                    ? "border-brand bg-brand/20 text-white"
+                    ? "border-brand bg-brand/20 text-zinc-100"
                     : "border-zinc-800 bg-zinc-900 text-zinc-300 hover:bg-zinc-800"
                 }`}
               >
@@ -482,7 +482,7 @@ export function Simulator() {
             <button
               onClick={generate}
               disabled={!terrain || computing || missingOrigin}
-              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-medium text-white hover:bg-brand-hover disabled:opacity-50"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-medium text-on-brand hover:bg-brand-hover disabled:opacity-50"
             >
               <Icon name="play" />
               {computing
@@ -542,7 +542,7 @@ export function Simulator() {
               <button
                 key={b}
                 onClick={() => setBasemap(b)}
-                className={`px-3 py-1.5 capitalize ${basemap === b ? "bg-zinc-700 text-white" : "text-zinc-400 hover:bg-zinc-800"}`}
+                className={`px-3 py-1.5 capitalize ${basemap === b ? "bg-zinc-700 text-zinc-100" : "text-zinc-400 hover:bg-zinc-800"}`}
               >
                 {b}
               </button>
@@ -579,7 +579,7 @@ export function Simulator() {
             badge={viewRun ? { text: `Run ${viewRun.id} · ${formatT(t)}`, color: RUN_COLORS[viewRun.id % RUN_COLORS.length] } : null}
           />
           {computing && (
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-950/50 text-sm font-medium backdrop-blur-sm">
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-zinc-900/50 text-sm font-medium backdrop-blur-sm">
               Running cellular automaton…
             </div>
           )}
@@ -663,7 +663,7 @@ function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean })
       ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
       : [["#2dd4bf", "River (within its banks)"], ["#5abeff", "Flood, shallow (0.15 m+)"], ["#0a46d7", "Flood, deep (2.5 m+)"]];
   return (
-    <div className="pointer-events-none absolute bottom-8 right-3 z-10 flex flex-col gap-1 rounded-lg bg-zinc-950/80 px-3 py-2 text-xs text-zinc-200 backdrop-blur">
+    <div className="pointer-events-none absolute bottom-8 right-3 z-10 flex flex-col gap-1 rounded-lg bg-zinc-900/80 px-3 py-2 text-xs text-zinc-200 backdrop-blur">
       {items.map(([c, l]) => (
         <span key={l} className="flex items-center gap-2">
           <span className="size-3 rounded-sm" style={{ background: c }} />
@@ -672,7 +672,7 @@ function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean })
       ))}
       {safePoints && (
         <span className="flex items-center gap-2">
-          <span className="size-3 rounded-full border-2 border-white bg-emerald-500" />
+          <span className="size-4 rounded-full border-2 border-white bg-safe" />
           Safe point (evacuation centre)
         </span>
       )}

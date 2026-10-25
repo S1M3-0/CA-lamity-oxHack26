@@ -1,12 +1,52 @@
 @import "tailwindcss";
 
-/* Swap these once you have a theme/brand — every component uses them. */
+/*
+ * Rosé Pine Dawn (https://rosepinetheme.com/en/palette/), hex codes as published:
+ *   base #faf4ed   surface #fffaf3   overlay #f2e9e1   muted #9893a5   subtle #797593
+ *   text #464261   love #b4637a      gold #ea9d34      rose #d7827e    pine #286983
+ *   foam #56949f   iris #907aa9      highlight low #f4ede8 / med #dfdad9 / high #cecacd
+ *
+ * Components use Tailwind's zinc greys, so overriding the scale here re-themes the whole
+ * app (the map keeps its own imagery). The scale is flipped for a light theme: zinc-950 is
+ * the page, zinc-900 the cards, higher steps are borders and hovers, and zinc-100..300 are
+ * text. Muted is too faint for text on these surfaces, so it only colours non-text details.
+ */
 @theme {
-  --color-brand: #4f46e5;
-  --color-brand-hover: #4338ca;
+  /* surfaces and borders, page to strongest line */
+  --color-zinc-950: #faf4ed; /* base */
+  --color-zinc-900: #fffaf3; /* surface */
+  --color-zinc-800: #dfdad9; /* highlight med */
+  --color-zinc-700: #cecacd; /* highlight high */
+  --color-zinc-600: #9893a5; /* muted */
+
+  /* text: primary, then subtle for secondary labels */
+  --color-zinc-100: #464261; /* text */
+  --color-zinc-200: #464261;
+  --color-zinc-300: #464261;
+  --color-zinc-400: #797593; /* subtle */
+  --color-zinc-500: #797593;
+
+  /* highlight: rose; hover is love. Text on solid rose buttons is the dark "on-brand" text. */
+  --color-brand: #d7827e;
+  --color-brand-hover: #b4637a;
+  --color-on-brand: #464261;
+
+  /* status and marker colours: love for warnings and icons, gold for the ignition marker */
+  --color-orange-400: #b4637a;
+  --color-orange-500: #ea9d34;
+  --color-amber-400: #b4637a;
+  --color-emerald-500: #56949f;
+
+  /* evacuation safe points: a dark green so the marker stands out on the map */
+  --color-safe: #2f7a1f;
+
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
 
+html {
+  color-scheme: light;
+}
+
 body {
-  @apply bg-zinc-50 text-zinc-900 antialiased dark:bg-zinc-950 dark:text-zinc-100;
+  @apply bg-zinc-950 text-zinc-100 antialiased;
 }

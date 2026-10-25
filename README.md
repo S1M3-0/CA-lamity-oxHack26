@@ -1,6 +1,6 @@
 # CA-lamity
 
-Our OxHack 2026 project. **TerraShift** (the app) simulates wildfires and floods on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. It also shows the nearest evacuation centres that stay safe as the disaster spreads.
+Our OxHack 2026 project. CA-lamity simulates wildfires and floods on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. It also shows the nearest evacuation centres that stay safe as the disaster spreads.
 
 Repo: https://github.com/S1M3-0/CA-lamity-oxHack26
 

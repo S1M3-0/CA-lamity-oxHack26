@@ -179,7 +179,7 @@ def ensure_facilities(run: dict) -> None:
             return
 
     body = urllib.parse.urlencode({"data": FACILITY_QUERY.format(s=s, w=w, n=n, e=e)}).encode()
-    request = urllib.request.Request(OVERPASS_URL, data=body, headers={"User-Agent": "TerraShift/0.1 (hackathon)"})
+    request = urllib.request.Request(OVERPASS_URL, data=body, headers={"User-Agent": "CA-lamity/0.1 (hackathon)"})
     with urllib.request.urlopen(request, timeout=90) as response:
         elements = json.load(response)["elements"]
 

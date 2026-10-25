@@ -7,8 +7,8 @@ import { Icon } from "./Icon";
 
 const WIDTH = 344;
 const GAP = 8;
-/** One series per chart; both steps pass lightness and 3:1 contrast on the zinc-900 panel. */
-const BAR_COLOR: Record<Hazard, string> = { wildfire: "#ea580c", flood: "#0284c7" };
+/** One series per chart: Rosé Pine Dawn love and pine, both above 4:1 contrast on the surface panel. */
+const BAR_COLOR: Record<Hazard, string> = { wildfire: "#b4637a", flood: "#286983" };
 
 type Props = {
   hazard: Hazard;
@@ -187,7 +187,7 @@ function SafePointList({ points, hour, status }: { points: SafePoint[] | null; h
   return (
     <div className="flex flex-col gap-1.5 border-t border-zinc-700/70 pt-2.5">
       <div className="flex items-center gap-2 font-medium text-zinc-200">
-        <span className="size-3 rounded-full border-2 border-white bg-emerald-500" aria-hidden="true" />
+        <span className="size-4 rounded-full border-2 border-white bg-safe" aria-hidden="true" />
         Evacuation centres · T+{hour}h
       </div>
       {points === null ? (
