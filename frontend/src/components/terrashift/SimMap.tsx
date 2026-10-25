@@ -4,7 +4,9 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { api, type MapGeoJSON } from "@/lib/api";
-import { renderFrame, type Hazard, type LngLat, type Station, type Terrain } from "@/lib/sim";
+import { renderFrame, type Hazard, type LngLat, type Person, type Station, type Terrain, type VulnerablePlace } from "@/lib/sim";
+import type { PlaceStatus } from "@/lib/sim/vulnerable";
+import type { PersonStatus } from "@/lib/sim/alerts";
 
 export type Basemap = "satellite" | "streets";
 export type SimMapProps = {
@@ -13,10 +15,16 @@ export type SimMapProps = {
   terrain: Terrain | null;
   hazard: Hazard | null;
   frame: Uint8Array | null;
+  /** run arrival times + current time, to draw evacuation zones ahead of the hazard */
+  zones: { arrival: Float32Array; now: number } | null;
   origin: LngLat | null;
   stations: Station[];
   /** fire crew positions in the current frame */
   crews: LngLat[] | null;
+  /** people to warn, coloured by whether they are safe, warned or reached */
+  people: { person: Person; status: PersonStatus }[];
+  /** hospitals, care homes and schools in the hazard's path, coloured by evacuation urgency */
+  places: { place: VulnerablePlace; status: PlaceStatus }[];
   basemap: Basemap;
   terrain3d: boolean;
   onMapClick?: (lngLat: LngLat) => void;
@@ -86,6 +94,24 @@ function corners(t: Terrain): [[number, number], [number, number], [number, numb
 
 export const STATION_CLASS = "size-3.5 rounded-sm border-2 border-white bg-red-600 shadow";
 export const CREW_CLASS = "size-3 rounded-full border-2 border-zinc-900 bg-yellow-300 shadow";
+const PERSON_COLORS: Record<PersonStatus, string> = {
+  outside: "bg-zinc-500",
+  safe: "bg-emerald-500",
+  pending: "bg-emerald-500",
+  warned: "bg-amber-400 animate-pulse",
+  hit: "bg-red-600",
+};
+const PLACE_COLORS: Record<PlaceStatus, string> = {
+  later: "bg-white text-zinc-900",
+  start_now: "bg-amber-400 text-zinc-950 animate-pulse",
+  late: "bg-red-600 text-white",
+  reached: "bg-zinc-900 text-red-400",
+};
+export const PLACE_LETTER: Record<VulnerablePlace["kind"], string> = { hospital: "H", care_home: "C", school: "S" };
+export const placeClass = (status: PlaceStatus) =>
+  `flex size-4 items-center justify-center rounded border-[1.5px] border-red-600 text-[9px] font-black shadow ${PLACE_COLORS[status]}`;
+export const personClass = (status: PersonStatus) =>
+  `flex size-6 items-center justify-center rounded-full border-2 border-white text-[11px] font-bold text-zinc-950 shadow-lg ${PERSON_COLORS[status]}`;
 
 function markerEl(className: string, text?: string) {
   const el = document.createElement("div");
@@ -102,6 +128,8 @@ export function SimMap(props: SimMapProps) {
   const markersRef = useRef<Marker[]>([]);
   const stationMarkersRef = useRef<Marker[]>([]);
   const crewMarkersRef = useRef<Marker[]>([]);
+  const peopleMarkersRef = useRef<Marker[]>([]);
+  const placeMarkersRef = useRef<Marker[]>([]);
   const fittedKeyRef = useRef<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -163,7 +191,7 @@ export function SimMap(props: SimMapProps) {
 
   function applyOverlay() {
     const map = mapRef.current;
-    const { terrain, hazard, frame } = propsRef.current;
+    const { terrain, hazard, frame, zones } = propsRef.current;
     if (!map || !loadedRef.current) return;
     const src = map.getSource("sim") as ImageSource | undefined;
     if (!src) return;
@@ -172,7 +200,7 @@ export function SimMap(props: SimMapProps) {
       return;
     }
     canvasRef.current ??= document.createElement("canvas");
-    renderFrame(canvasRef.current, terrain, hazard, frame);
+    renderFrame(canvasRef.current, terrain, hazard, frame, zones);
     src.updateImage({ url: canvasRef.current.toDataURL(), coordinates: corners(terrain) });
   }
 
@@ -219,6 +247,30 @@ export function SimMap(props: SimMapProps) {
     });
   }
 
+  function applyPeople() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib) return;
+    peopleMarkersRef.current.forEach((m) => m.remove());
+    peopleMarkersRef.current = propsRef.current.people.map(({ person, status }) => {
+      const el = markerEl(personClass(status), (person.name || "?").slice(0, 1).toUpperCase());
+      el.title = person.name;
+      return new lib.Marker({ element: el }).setLngLat(person.lngLat).addTo(map);
+    });
+  }
+
+  function applyPlaces() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib) return;
+    placeMarkersRef.current.forEach((m) => m.remove());
+    placeMarkersRef.current = propsRef.current.places.map(({ place, status }) => {
+      const el = markerEl(placeClass(status), PLACE_LETTER[place.kind]);
+      el.title = place.name;
+      return new lib.Marker({ element: el }).setLngLat(place.lngLat).addTo(map);
+    });
+  }
+
   function applyCrews() {
     const map = mapRef.current;
     const lib = libRef.current;
@@ -256,6 +308,8 @@ export function SimMap(props: SimMapProps) {
     applyMarkers();
     applyStations();
     applyCrews();
+    applyPeople();
+    applyPlaces();
     applyStyleToggles();
   }
 
@@ -292,11 +346,13 @@ export function SimMap(props: SimMapProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [props.showLaAoi]);
 
-  useEffect(applyOverlay, [props.terrain, props.hazard, props.frame]);
+  useEffect(applyOverlay, [props.terrain, props.hazard, props.frame, props.zones]);
   useEffect(applyCamera, [props.terrain, props.center]);
   useEffect(applyMarkers, [props.origin, props.hazard]);
   useEffect(applyStations, [props.stations]);
   useEffect(applyCrews, [props.crews]);
+  useEffect(applyPeople, [props.people]);
+  useEffect(applyPlaces, [props.places]);
   useEffect(applyStyleToggles, [props.basemap, props.terrain3d]);
 
   return (

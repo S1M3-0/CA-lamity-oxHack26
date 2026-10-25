@@ -78,12 +78,61 @@ export function runSimulation(
   return simulateFlood(t, p, originCell >= 0 ? originCell : null);
 }
 
+/** Evacuation zones by hours until the hazard arrives: evacuate now, get ready, stay alert. */
+export const ZONES = [
+  { label: "Evacuate now", within: 1, rgb: [225, 29, 72] },
+  // violet, not orange, so it can't be mistaken for burning cells
+  { label: "Get ready", within: 3, rgb: [168, 85, 247] },
+  { label: "Stay alert", within: 6, rgb: [253, 224, 71] },
+] as const;
+
+/** Cells of safety margin around the predicted path; also smooths out the fire's speckle. */
+const ZONE_BUFFER = 2;
+const buffered = new WeakMap<Float32Array, Float32Array>();
+
+/** Earliest arrival within ZONE_BUFFER cells of each cell (computed once per run). */
+function bufferedArrival(arrival: Float32Array, w: number): Float32Array {
+  let out = buffered.get(arrival);
+  if (out) return out;
+  const h = arrival.length / w;
+  const rows = new Float32Array(arrival.length);
+  out = new Float32Array(arrival.length);
+  // separable min filter: along rows, then along columns
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let m = Infinity;
+      for (let d = -ZONE_BUFFER; d <= ZONE_BUFFER; d++) if (x + d >= 0 && x + d < w) m = Math.min(m, arrival[y * w + x + d]);
+      rows[y * w + x] = m;
+    }
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let m = Infinity;
+      for (let d = -ZONE_BUFFER; d <= ZONE_BUFFER; d++) if (y + d >= 0 && y + d < h) m = Math.min(m, rows[(y + d) * w + x]);
+      out[y * w + x] = m;
+    }
+  buffered.set(arrival, out);
+  return out;
+}
+
+/** Zone index for each cell at time `now` (hours): 0..2 = ZONES, 3 = none, -1 = already hit. */
+export function zoneOf(arrival: Float32Array, frame: Uint8Array, now: number, w: number): Int8Array {
+  const a = bufferedArrival(arrival, w);
+  const z = new Int8Array(arrival.length);
+  for (let k = 0; k < arrival.length; k++) {
+    const dt = a[k] - now;
+    z[k] = frame[k] || dt <= 0 ? -1 : dt <= ZONES[0].within ? 0 : dt <= ZONES[1].within ? 1 : dt <= ZONES[2].within ? 2 : 3;
+  }
+  return z;
+}
+
 /** Paints one frame of a run into an RGBA buffer the size of the grid. */
 export function renderFrame(
   canvas: HTMLCanvasElement,
   t: Terrain,
   hazard: Hazard | null,
   frame: Uint8Array | null,
+  /** with the run's arrival times and the current time, evacuation zones are drawn ahead of the hazard */
+  zones: { arrival: Float32Array; now: number } | null = null,
 ) {
   canvas.width = t.w;
   canvas.height = t.h;
@@ -91,6 +140,20 @@ export function renderFrame(
   if (!ctx) return;
   const img = ctx.createImageData(t.w, t.h);
   const px = img.data;
+  if (frame && zones) {
+    const z = zoneOf(zones.arrival, frame, zones.now, t.w);
+    for (let k = 0; k < z.length; k++) {
+      if (z[k] < 0 || z[k] > 2) continue;
+      const x = k % t.w, y = (k - x) / t.w;
+      // bold outer edge where the next cell out is a later zone (or none), faint fill inside
+      const edge =
+        (x > 0 && z[k - 1] > z[k]) || (x < t.w - 1 && z[k + 1] > z[k]) ||
+        (y > 0 && z[k - t.w] > z[k]) || (y < t.h - 1 && z[k + t.w] > z[k]);
+      const [r, g, b] = ZONES[z[k]].rgb;
+      const o = k * 4;
+      px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = edge ? 230 : 60;
+    }
+  }
   if (frame && hazard) {
     for (let k = 0; k < frame.length; k++) {
       const v = frame[k];

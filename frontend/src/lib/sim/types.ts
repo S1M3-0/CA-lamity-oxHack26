@@ -40,6 +40,12 @@ export type Params = {
   crews: number;
 };
 
+/** Someone to warn: their home on the map and, optionally, a phone number for real alerts. */
+export type Person = { id: number; name: string; phone: string; lngLat: LngLat };
+
+/** A hospital, care home or school from OpenStreetMap: places whose people can't just leave. */
+export type VulnerablePlace = { name: string; kind: "hospital" | "care_home" | "school"; lngLat: LngLat };
+
 /** A real fire station from OpenStreetMap. */
 export type Station = { name: string; lngLat: LngLat };
 

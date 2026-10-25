@@ -1,5 +1,6 @@
 import { compass } from "./index";
 import { cellToLngLat, lngLatToCell } from "./terrain";
+import { KIND_LABEL, type PlaceAtRisk } from "./vulnerable";
 import { FRAMES_PER_HOUR, HOURS, type Hazard, type LngLat, type Params, type SimResult, type Station, type Terrain } from "./types";
 
 export type BriefingInput = {
@@ -10,6 +11,8 @@ export type BriefingInput = {
   origin: LngLat | null;
   stations: Station[];
   result: SimResult;
+  /** hospitals, care homes and schools in the path, most urgent first */
+  placesAtRisk?: PlaceAtRisk[];
 };
 
 type StationFact = { name: string; km: number; direction: string };
@@ -27,6 +30,8 @@ export type BriefingFacts = {
   putOutKm2: number;
   nearestStations: StationFact[];
   stationsReached: { name: string; hour: number }[];
+  /** most urgent vulnerable places: when evacuation must start, and when the hazard arrives */
+  evacuateFirst: { name: string; kind: string; startEvacuatingByHour: number; hazardArrivesHour: number }[];
 };
 
 const round1 = (v: number) => Math.round(v * 10) / 10;
@@ -115,19 +120,26 @@ export function summarizeRun(r: BriefingInput): BriefingFacts {
     putOutKm2: round1(putOut * cellKm2),
     nearestStations,
     stationsReached,
+    evacuateFirst: (r.placesAtRisk ?? []).slice(0, 4).map((p) => ({
+      name: p.place.name,
+      kind: KIND_LABEL[p.place.kind].toLowerCase(),
+      startEvacuatingByHour: round1(Math.max(0, p.startByH)),
+      hazardArrivesHour: round1(p.arrivalH),
+    })),
   };
 }
 
 // Written out so speech engines say "southwest", not "S W".
-const COMPASS_WORDS: Record<string, string> = {
+export const COMPASS_WORDS: Record<string, string> = {
   N: "north", NE: "northeast", E: "east", SE: "southeast", S: "south", SW: "southwest", W: "west", NW: "northwest",
 };
+
+/** "Los Angeles Fire Department Fire Station 9" -> "Station 9" */
+export const shortStationName = (name: string) => name.match(/station\s*\d+\w*/i)?.[0].replace(/^s/, "S") ?? name;
 
 /** Briefing written without AI, used when Gemini isn't configured or fails. Phrased to be read aloud. */
 export function templateBriefing(f: BriefingFacts): string {
   const km = (v: number) => `${v} square kilometre${v === 1 ? "" : "s"}`;
-  // "Los Angeles Fire Department Fire Station 9" -> "Station 9"
-  const short = (name: string) => name.match(/station\s*\d+\w*/i)?.[0].replace(/^s/, "S") ?? name;
   const hoursIn = (h: number) => (h < 1 ? "within the first hour" : `about ${Math.round(h)} hour${Math.round(h) === 1 ? "" : "s"} in`);
   const toward = f.spread && f.spread.direction !== "all directions" ? COMPASS_WORDS[f.spread.direction] : null;
   const wind = (f.conditions.wind ?? "")
@@ -143,9 +155,12 @@ export function templateBriefing(f: BriefingFacts): string {
       `Water is spreading ${toward ? `toward the ${toward}` : "in all directions"}, ${km(f.areaKm2["6h"])} flooded after six hours and ${km(f.areaKm2["24h"])} by the end of the day.`,
     );
   }
-  for (const st of f.stationsReached.slice(0, 2)) s.push(`It reaches ${short(st.name)} ${hoursIn(st.hour)}.`);
+  for (const st of f.stationsReached.slice(0, 2)) s.push(`It reaches ${shortStationName(st.name)} ${hoursIn(st.hour)}.`);
+  const first = f.evacuateFirst.slice(0, 2);
+  if (first.length)
+    s.push(`Priority evacuations: ${first.map((p) => `${p.name}, a ${p.kind}, start ${p.startEvacuatingByHour < 0.5 ? "immediately" : `within ${Math.round(p.startEvacuatingByHour)} hours`}`).join("; ")}.`);
   if (f.hazard === "wildfire") {
-    const nearest = f.nearestStations.slice(0, 2).map((st) => short(st.name));
+    const nearest = f.nearestStations.slice(0, 2).map((st) => shortStationName(st.name));
     if (f.crewsSent === 0) {
       s.push(`No crews assigned.${nearest.length ? ` Recommend immediate dispatch from ${nearest.join(" and ")}.` : ""}`);
     } else {

@@ -28,11 +28,18 @@ spreading, what it reaches and when, and what crews should do (name the real sta
 and who should evacuate. Use only the facts given; never invent street names or numbers.
 The wind speed is not how fast the hazard moves: describe spread with the areas and reach
 distances. Round times to whole hours ("about seven hours in") and shorten station names
-("Station 4"). Compass directions are where it is heading or where the station is."""
+("Station 4"). Compass directions are where it is heading or where the station is.
+If "evacuateFirst" lists hospitals, care homes or schools, name the most urgent one or two and
+when their evacuation must start: their people need vehicles and staff, so they go first."""
+
+
+# Languages ElevenLabs' multilingual flash model can speak; keep in sync with LANGUAGES in DispatchRadio.tsx.
+LANGUAGES = {"English", "Spanish", "Polish", "Arabic", "Chinese", "Korean"}
 
 
 class BriefingRequest(BaseModel):
     facts: dict = Field(description="Simulation summary built by the frontend (lib/sim/briefing.ts)")
+    language: str = "English"
 
 
 class SpeechRequest(BaseModel):
@@ -68,6 +75,15 @@ def briefing(data: BriefingRequest):
     facts = json.dumps(data.facts)
     if len(facts) > 6000:
         raise HTTPException(413, "facts too large")
+    if data.language not in LANGUAGES:
+        raise HTTPException(422, f"language must be one of {sorted(LANGUAGES)}")
+    prompt = SYSTEM_PROMPT
+    if data.language != "English":
+        prompt += (
+            f"\nWrite the whole briefing in {data.language}, as a native {data.language}-speaking dispatcher"
+            " would say it. Keep place and station names as given, and start with the"
+            f" {data.language} for \"All units, simulated incident\"."
+        )
     # Flash-lite answers in a few seconds; the bigger Flash models took 15-60 s (October 2026).
     model = os.getenv("GEMINI_MODEL", "gemini-3.5-flash-lite")
     out = json.loads(
@@ -75,7 +91,7 @@ def briefing(data: BriefingRequest):
             GEMINI_URL.format(model=model),
             {"x-goog-api-key": key},
             {
-                "systemInstruction": {"parts": [{"text": SYSTEM_PROMPT}]},
+                "systemInstruction": {"parts": [{"text": prompt}]},
                 "contents": [{"role": "user", "parts": [{"text": facts}]}],
                 "generationConfig": {"temperature": 0.4},
             },
@@ -88,16 +104,20 @@ def briefing(data: BriefingRequest):
     return {"text": text, "source": "gemini", "model": model}
 
 
-@router.post("/speech")
-def speech(data: SpeechRequest):
+def synthesize(text: str) -> bytes:
+    """MP3 of `text` in the dispatcher voice. Also used for alert phone calls."""
     key = os.getenv("ELEVENLABS_API_KEY")
     if not key:
         raise HTTPException(503, "ELEVENLABS_API_KEY is not set")
     # Default voice: "George", one of ElevenLabs' premade voices.
     voice = os.getenv("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
-    audio = _post(
+    return _post(
         ELEVENLABS_URL.format(voice=voice),
         {"xi-api-key": key, "Accept": "audio/mpeg"},
-        {"text": data.text, "model_id": os.getenv("ELEVENLABS_MODEL", "eleven_flash_v2_5")},
+        {"text": text, "model_id": os.getenv("ELEVENLABS_MODEL", "eleven_flash_v2_5")},
     )
-    return Response(audio, media_type="audio/mpeg")
+
+
+@router.post("/speech")
+def speech(data: SpeechRequest):
+    return Response(synthesize(data.text), media_type="audio/mpeg")

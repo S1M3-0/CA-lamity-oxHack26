@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type MapGeoJSON } from "@/lib/api";
 import { GOOGLE_MAPS_API_KEY, GOOGLE_MAPS_MAP_ID } from "@/lib/config";
 import { renderFrame, type Terrain } from "@/lib/sim";
-import { CREW_CLASS, STATION_CLASS, type SimMapProps } from "./SimMap";
+import { CREW_CLASS, PLACE_LETTER, STATION_CLASS, personClass, placeClass, type SimMapProps } from "./SimMap";
 
 const EMPTY_GEOJSON: MapGeoJSON = { type: "FeatureCollection", features: [] };
 
@@ -93,6 +93,8 @@ export function GoogleSimMap(props: SimMapProps) {
   const markerLibRef = useRef<google.maps.MarkerLibrary | null>(null);
   const stationMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const crewMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const peopleMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
+  const placeMarkersRef = useRef<google.maps.marker.AdvancedMarkerElement[]>([]);
   const fittedKeyRef = useRef<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -152,9 +154,9 @@ export function GoogleSimMap(props: SimMapProps) {
   function applyOverlay() {
     const overlay = overlayRef.current;
     if (!liveMap() || !overlay) return;
-    const { terrain, hazard, frame } = propsRef.current;
+    const { terrain, hazard, frame, zones } = propsRef.current;
     overlay.setTerrain(terrain);
-    if (terrain) renderFrame(overlay.canvas, terrain, hazard, frame);
+    if (terrain) renderFrame(overlay.canvas, terrain, hazard, frame, zones);
   }
 
   function applyCamera() {
@@ -197,6 +199,30 @@ export function GoogleSimMap(props: SimMapProps) {
     stationMarkersRef.current = propsRef.current.stations.map(
       (s) => new lib.AdvancedMarkerElement({ map, position: { lat: s.lngLat[1], lng: s.lngLat[0] }, content: dot(STATION_CLASS, s.name), title: s.name }),
     );
+  }
+
+  function applyPeople() {
+    const map = liveMap();
+    const lib = markerLibRef.current;
+    if (!map || !lib) return;
+    peopleMarkersRef.current.forEach((m) => (m.map = null));
+    peopleMarkersRef.current = propsRef.current.people.map(({ person, status }) => {
+      const el = dot(personClass(status), person.name);
+      el.textContent = (person.name || "?").slice(0, 1).toUpperCase();
+      return new lib.AdvancedMarkerElement({ map, position: { lat: person.lngLat[1], lng: person.lngLat[0] }, content: el, title: person.name });
+    });
+  }
+
+  function applyPlaces() {
+    const map = liveMap();
+    const lib = markerLibRef.current;
+    if (!map || !lib) return;
+    placeMarkersRef.current.forEach((m) => (m.map = null));
+    placeMarkersRef.current = propsRef.current.places.map(({ place, status }) => {
+      const el = dot(placeClass(status), place.name);
+      el.textContent = PLACE_LETTER[place.kind];
+      return new lib.AdvancedMarkerElement({ map, position: { lat: place.lngLat[1], lng: place.lngLat[0] }, content: el, title: place.name });
+    });
   }
 
   function applyCrews() {
@@ -259,11 +285,13 @@ export function GoogleSimMap(props: SimMapProps) {
   }, [props.showLaAoi, ready]);
 
   /* eslint-disable react-hooks/exhaustive-deps */
-  useEffect(applyOverlay, [ready, props.terrain, props.hazard, props.frame]);
+  useEffect(applyOverlay, [ready, props.terrain, props.hazard, props.frame, props.zones]);
   useEffect(applyCamera, [ready, props.terrain, props.center]);
   useEffect(applyMarker, [ready, props.origin, props.hazard]);
   useEffect(applyStations, [ready, props.stations]);
   useEffect(applyCrews, [ready, props.crews]);
+  useEffect(applyPeople, [ready, props.people]);
+  useEffect(applyPlaces, [ready, props.places]);
   useEffect(applyStyleToggles, [ready, props.basemap, props.terrain3d]);
   /* eslint-enable react-hooks/exhaustive-deps */
 

@@ -1,7 +1,7 @@
 // Rename the app in one place once you have a theme.
 export const APP_NAME = "TerraShift";
 export const APP_TAGLINE =
-  "Pick a real place and a disaster, set the conditions, and watch it unfold over 24 hours.";
+  "Predictive evacuation for wildfires and floods";
 
 // Set these in frontend/.env.local (never commit the key). With no key the
 // map falls back to MapLibre + Esri imagery.

@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi import APIRouter, FastAPI  # noqa: E402
 
 from api.db import DATABASE_URL, init_db  # noqa: E402
-from api.routes import aoi, dispatch, fire, items  # noqa: E402
+from api.routes import aoi, alerts, dispatch, fire, items  # noqa: E402
 
 
 @asynccontextmanager
@@ -45,6 +45,7 @@ api.include_router(items.router)
 api.include_router(aoi.router)
 api.include_router(fire.router)
 api.include_router(dispatch.router)
+api.include_router(alerts.router)
 # api.include_router(<your_new_router>.router)
 
 app.include_router(api)
