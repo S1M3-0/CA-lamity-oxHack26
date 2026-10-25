@@ -107,7 +107,7 @@ function StatsBody({ hazard, stats }: { hazard: Hazard; stats: RunStats }) {
       </>
     ) : (
       <>
-        <Tile label="Total rainfall" value={s.total_rain_mm} unit="mm" note={`${s.rain_rate_mm_h ?? 0} mm/h for 24 h`} />
+        <Tile label="Total rainfall" value={s.total_rain_mm} unit="mm" note={`${s.rain_rate_mm_h ?? 0} mm/h average over ${s.storm_hours ?? 24} h`} />
         <Tile label="Peak flooded" value={s.peak_area_km2} unit="km²" note={at(s.peak_area_hour)} />
         <Tile label="Peak 1 m+ deep" value={s.peak_active_km2} unit="km²" note={at(s.peak_active_hour)} />
         <Tile label="Flooded at 24 h" value={s.final_area_km2} unit="km²" />

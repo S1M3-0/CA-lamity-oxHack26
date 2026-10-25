@@ -1,11 +1,11 @@
 import { simulateFlood, simulateWildfire } from "./models";
 import { hashString } from "./rng";
 import { lngLatToCell } from "./terrain";
-import { type Hazard, type LngLat, type Params, type SimResult, type Terrain } from "./types";
+import { FLOOD_MIN, type Hazard, type LngLat, type Params, type SimResult, type Terrain } from "./types";
 
 export * from "./types";
 export { loadTerrain, lngLatToCell, cellToLngLat, terrainKey } from "./terrain";
-export { backendCoversFire, runBackendWildfire } from "./backend";
+export { backendCoversFire, runBackendFlood, runBackendWildfire } from "./backend";
 
 export type ParamKey = keyof Params;
 
@@ -21,9 +21,9 @@ export const HAZARDS: Record<
   },
   flood: {
     label: "Flood",
-    params: ["rainfall", "saturation"],
+    params: ["rainfall", "stormHours", "saturation"],
     originLabel: null,
-    blurb: "Rain-on-grid runoff over real elevation.",
+    blurb: "Storm runoff drains into rivers over real elevation, then spills onto the floodplain.",
   },
 };
 
@@ -35,6 +35,7 @@ export const PARAM_META: Record<
   windDir: { label: "Wind direction (from)", min: 0, max: 355, step: 5, unit: "°" },
   humidity: { label: "Relative humidity", min: 0, max: 100, step: 5, unit: "%" },
   rainfall: { label: "Rainfall intensity", min: 0, max: 100, step: 5, unit: "mm/h" },
+  stormHours: { label: "Storm duration", min: 1, max: 24, step: 1, unit: "h" },
   saturation: { label: "Soil saturation", min: 0, max: 100, step: 5, unit: "%" },
 };
 
@@ -42,7 +43,8 @@ export const DEFAULT_PARAMS: Params = {
   windSpeed: 35,
   windDir: 45,
   humidity: 30,
-  rainfall: 50,
+  rainfall: 25,
+  stormHours: 6,
   saturation: 40,
 };
 
@@ -53,7 +55,7 @@ export function compass(deg: number) {
 export function describeParams(hazard: Hazard, p: Params) {
   if (hazard === "wildfire")
     return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ${p.humidity}% RH`;
-  return `${p.rainfall} mm/h rain · ${p.saturation}% soil`;
+  return `${p.rainfall} mm/h for ${p.stormHours} h · ${p.saturation}% soil`;
 }
 
 export function runSeed(hazard: Hazard, t: Terrain, p: Params, origin: LngLat | null) {
@@ -96,6 +98,9 @@ export function renderFrame(
       if (hazard === "wildfire") {
         if (v === 255) { px[o] = 255; px[o + 1] = 120 + ((k * 7) % 60); px[o + 2] = 20; px[o + 3] = 240; }
         else { px[o] = 55; px[o + 1] = 18; px[o + 2] = 12; px[o + 3] = 175; }
+      } else if (v < FLOOD_MIN) {
+        // water still inside a river channel
+        px[o] = 45; px[o + 1] = 212; px[o + 2] = 191; px[o + 3] = 170;
       } else {
         const a = (v - 40) / 215;
         px[o] = 90 - 80 * a; px[o + 1] = 190 - 120 * a; px[o + 2] = 255 - 40 * a; px[o + 3] = 120 + 120 * a;

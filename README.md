@@ -1,22 +1,57 @@
-# Hackathon App
+# CA-lamity
 
-Next.js (App Router) + Tailwind CSS v4 frontend, FastAPI backend, Postgres (Neon) on Vercel — one repo, two folders, two Vercel projects.
+Our OxHack 2026 project. **TerraShift** (the app) simulates wildfires and floods on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. It also shows the nearest evacuation centres that stay safe as the disaster spreads.
+
+Repo: https://github.com/S1M3-0/CA-lamity-oxHack26
+
+## Features
+
+- **Wildfire.** Click the map to start a fire, then set wind speed, wind direction and humidity.
+  - **Inside LA County:** the fire runs on real 30 m maps, USGS 3DEP elevation and NLCD 2021 land cover. Chaparral and grass burn readily, cities and roads barely burn, and rivers stop the fire.
+  - **Everywhere else:** land cover comes from OpenStreetMap tiles.
+- **Flood.** Set rainfall intensity, storm duration and soil saturation.
+  - **Where the water goes:** runoff drains downhill into river channels. Rivers rise (teal), then spill onto the floodplain (blue) once they're over their banks.
+  - **What changes how much runs off:** paved ground sheds rain, forest soaks it up, and the soil gets wetter as the storm goes on.
+- **Evacuation safe points.** For every simulated hour, the app checks 8 compass directions around the disaster. In each one it pins the nearest school, college, community centre or shelter that the disaster never comes near during the run. The centres come from OpenStreetMap.
+- **Statistics.** After a run, the Statistics panel shows totals and an hourly chart:
+  - **Fire:** area burned, fastest and average spread, and peak burning area.
+  - **Flood:** total rainfall, peak flooded area and deep-water area.
+- **Saved scenarios.** Every run is saved to Tiger Data (TimescaleDB + PostGIS), so your scenarios and last settings come back after a refresh. Press **Clear simulation** before starting a new one.
+- **Map.** Switch between satellite and street basemaps, or turn on 3D terrain.
+
+These are illustrations, not forecasts. The models are simplified and uncalibrated, so don't use them for real evacuation decisions.
+
+## How it works
+
+| Part | What it does |
+|---|---|
+| `backend/CA.py` | Wildfire automaton (numpy). Each burning cell can ignite its 8 neighbours. The chance depends on fuel, humidity, wind and slope (after Alexandridis et al., 2008). |
+| `backend/flood.py` | Flood automaton. It carves rivers into the elevation and fills pits so water always drains, computes flow directions and upstream area, sizes each channel to its catchment, routes runoff downhill at Manning speeds, and spreads overbank water across the floodplain. |
+| `backend/fire_maps.py` | Crops, downsamples and caches the LA elevation and land-cover maps. |
+| `backend/api/tiger.py` | Tiger Data storage. A hypertable holds each hour's outline of the affected area, another holds per-frame statistics, and PostGIS runs the evacuation-centre queries. |
+| `frontend/src/lib/sim/` | Loads terrain in the browser (elevation tiles, plus land cover from OSM tiles), draws frames, and holds fallback in-browser models. |
+
+## Project structure
 
 ```
-package.json            runs both with `npm run dev` (npm workspace root)
-backend/                FastAPI (deployed as a Vercel Python function)
-  api/index.py          app + router registration
-  api/db.py             SQLite locally, Postgres when DATABASE_URL is set
-  api/models.py         SQLModel tables + request schemas  (placeholder: Item)
-  api/routes/items.py   example CRUD router
+package.json                 runs both sides with `npm run dev` (npm workspace root)
+backend/                     FastAPI
+  CA.py                      wildfire cellular automaton
+  flood.py                   flood cellular automaton (river routing)
+  fire_maps.py               LA map loader (crop, downsample, cache)
+  api/index.py               app + router registration
+  api/db.py                  SQLite locally, Postgres/Tiger Data when DATABASE_URL is set
+  api/tiger.py               Tiger Data schema, run storage, safe-point and stats queries
+  api/routes/fire.py         POST /api/fire/la, /api/fire/simulate
+  api/routes/flood.py        POST /api/flood/simulate
+  api/routes/runs.py         saved runs, /safe-points, /stats
+  data/maps/                 LA rasters (not in git, see below)
   requirements.txt
-  vercel.json           sends every path to the FastAPI app
-frontend/               Next.js
-  src/app/              pages (layout.tsx, page.tsx, globals.css)
-  src/components/       ApiStatus, ItemsPanel (placeholder feature)
-  src/lib/api.ts        typed fetch client for /api/*
-  src/lib/config.ts     app name + tagline
-  next.config.ts        forwards /api/* to the backend (API_URL)
+frontend/                    Next.js (App Router) + Tailwind CSS v4 + MapLibre
+  src/components/terrashift/ Simulator, SimMap, StatsPanel, InfoTip
+  src/lib/sim/               terrain loading, rendering, browser fallback models
+  src/lib/api.ts             typed client for /api/*
+  next.config.ts             forwards /api/* to the backend (API_URL)
 ```
 
 ## Run locally
@@ -32,44 +67,46 @@ pip install -r backend/requirements.txt
 npm run dev                              # Next on :3000 + FastAPI on :8000
 ```
 
-Activate the venv in each new terminal before `npm run dev`. To run one side only: `npm run dev:web` or `npm run dev:api`.
+Activate the venv in every new terminal before `npm run dev`, or the API won't start. Then open http://localhost:3000. API docs are at http://localhost:3000/api/docs.
 
-Open http://localhost:3000. The badge in the corner should say **API ok · sqlite**. API docs: http://localhost:3000/api/docs
+### Tiger Data (saved runs, safe points, statistics)
 
-No database setup needed locally — it writes `backend/local.db`. Changed a model? Delete it and restart.
+1. Create a service on [Tiger Cloud](https://console.cloud.timescale.com).
+2. Put its connection string in `backend/.env`. That file is gitignored, so never commit it.
+   ```
+   DATABASE_URL=postgres://tsdbadmin:<password>@<host>.tsdb.cloud.timescale.com:<port>/tsdb?sslmode=require
+   ```
+3. The tables, hypertables and the PostGIS extension are created automatically on the first request.
 
-## MapLibre + LA GeoJSON
+Without `DATABASE_URL`, the simulations still run, but nothing is saved and safe points and statistics are unavailable.
 
-MapLibre is already used by `frontend/src/components/terrashift/SimMap.tsx` for the basemap and simulation overlay. To add your LA area of interest:
+### LA maps (for the LA wildfire model)
 
-1. Save valid GeoJSON to `backend/data/aoi/la.geojson`. Use WGS84 coordinates in `[longitude, latitude]` order. Commit this file when deploying.
-2. Run `npm run dev` and open http://localhost:3000/api/aoi/la. The endpoint should return your GeoJSON; a 404 means the file has not been saved at that path.
-3. In the app, select **Los Angeles**. The client fetches `/api/aoi/la` through the existing Next.js rewrite, then adds a blue GeoJSON fill and outline to MapLibre. The map displays an API error if loading fails.
+The rasters are too big for git. Put them in `backend/data/maps/`:
 
-For deployment, set `API_URL` on the frontend Vercel project as described below. The browser uses the same `/api/aoi/la` path in both environments, so no browser CORS configuration or client-side backend URL is needed.
+| File | Source |
+|---|---|
+| `LA_DEM_3DEP_1arcsec.tif` | USGS 3DEP 1 arc-second DEM tiles `n34w119`, `n34w118`, `n35w119`, `n35w118` (from `prd-tnm.s3.amazonaws.com`), merged and cropped to 118.96°–117.63°W, 33.69°–34.84°N |
+| `LA_NLCD_2021_Land_Cover.tif` | NLCD 2021 Land Cover from the MRLC WCS (`mrlc_download__NLCD_2021_Land_Cover_L48`), same area |
 
-## Deploy to Vercel
+Without them, wildfires inside LA fall back to the in-browser model. Floods don't need them.
 
-Import the same GitHub repo twice on vercel.com, once per folder:
+## Deploying
 
-1. **Backend:** Import → **Root Directory** `backend`, framework **Other**. Then **Storage → Create → Neon** (or `vercel install neon`) to set `DATABASE_URL`, and redeploy. Check `https://<backend>.vercel.app/api/health`.
-2. **Frontend:** Import → **Root Directory** `frontend` (framework: Next.js). Add the env var `API_URL` = the backend's URL (no trailing slash), then deploy.
-3. The badge should now say **API ok · postgresql+psycopg**.
+- **Backend (Vultr):** run `uvicorn api.index:app` from `backend/`, without `--reload`, behind HTTPS (e.g. Caddy or nginx). Copy `data/maps/` onto the server and set `DATABASE_URL`.
+- **Frontend (Vercel):** import the repo with **Root Directory** `frontend`, then set `API_URL` to the backend's URL, with no trailing slash.
+- The browser only ever calls `/api/*` on the frontend's domain, so no CORS setup is needed, and the database credentials stay on the backend.
 
-Tables are created automatically on first request. To use Neon locally too: `cd backend && vercel env pull .env.local`.
+## Data and credits
 
-## When the themes drop — checklist
-
-1. **Name it:** edit `frontend/src/lib/config.ts`, swap colours in `frontend/src/app/globals.css` (`--color-brand`).
-2. **Model the data:** rename `Item` in `backend/api/models.py` (keep the Base / table / Create / Update pattern) and add fields.
-3. **API:** copy `backend/api/routes/items.py` for each resource, then `api.include_router(...)` in `backend/api/index.py`.
-4. **Types:** mirror the model in `frontend/src/lib/api.ts` and add client methods.
-5. **UI:** replace `ItemsPanel` with your feature; add pages under `frontend/src/app/<route>/page.tsx`.
-6. Delete `backend/local.db` after changing models.
+- Elevation: USGS 3DEP (LA); Mapzen/AWS Terrain Tiles (in-browser)
+- Land cover: NLCD 2021 (MRLC); © OpenStreetMap contributors
+- Imagery: Esri World Imagery
+- Evacuation centres: © OpenStreetMap contributors, via the Overpass API
+- Fire spread model after Alexandridis et al. (2008), *A cellular automata model for forest fire spread prediction*
 
 ## Gotchas
 
-- Every FastAPI route must start with `/api` (the router in `index.py` adds it). Don't put Next.js route handlers under `frontend/src/app/api`.
-- Python functions on Vercel are serverless: no background threads, no writing to disk except `/tmp`, and keep cold-start imports light (heavy ML libraries can exceed size limits — call a hosted API instead).
-- Use Neon's **pooled** connection string (the Marketplace default).
-- Need secrets (e.g. an LLM API key)? Add them to the **backend** project in Vercel → Settings → Environment Variables, and to `backend/.env.local` locally; read with `os.getenv` in Python. Never expose them to the browser.
+- Every FastAPI route starts with `/api` (the router in `index.py` adds it). Don't put Next.js route handlers under `frontend/src/app/api`.
+- On Windows, `uvicorn --reload` sometimes logs "Reloading" but keeps serving old code. Restart `npm run dev` if backend changes don't seem to apply.
+- The first safe-point request for a new area fetches evacuation centres from OpenStreetMap, which can take a few seconds. After that they're cached in Tiger Data.

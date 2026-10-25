@@ -18,7 +18,7 @@ from fastapi import APIRouter, FastAPI  # noqa: E402
 from fastapi.middleware.gzip import GZipMiddleware  # noqa: E402
 
 from api.db import DATABASE_URL, init_db  # noqa: E402
-from api.routes import aoi, fire, items, runs  # noqa: E402
+from api.routes import aoi, fire, flood, items, runs  # noqa: E402
 
 
 @asynccontextmanager
@@ -47,6 +47,7 @@ def health():
 api.include_router(items.router)
 api.include_router(aoi.router)
 api.include_router(fire.router)
+api.include_router(flood.router)
 api.include_router(runs.router)
 # api.include_router(<your_new_router>.router)
 

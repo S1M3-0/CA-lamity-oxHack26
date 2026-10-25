@@ -13,6 +13,7 @@ import {
   compass,
   describeParams,
   loadTerrain,
+  runBackendFlood,
   runBackendWildfire,
   runSeed,
   runSimulation,
@@ -133,7 +134,8 @@ export function Simulator() {
   );
   const meta = HAZARDS[hazard];
   const missingOrigin = meta.originLabel !== null && origin === null;
-  const useBackend = hazard === "wildfire" && terrain !== null && backendCoversFire(terrain);
+  // Floods always use the backend's river routing; fire only where it has the LA maps.
+  const useBackend = hazard === "flood" || (terrain !== null && backendCoversFire(terrain));
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -205,9 +207,11 @@ export function Simulator() {
   async function simulateRun(h: Hazard, tr: Terrain, p: Params, o: LngLat | null, seed: number, wantBackend: boolean) {
     if (wantBackend) {
       try {
-        return { sim: await runBackendWildfire(tr, p, o, seed), source: "backend" as const };
+        const sim = h === "flood" ? await runBackendFlood(tr, p) : await runBackendWildfire(tr, p, o, seed);
+        return { sim, source: "backend" as const };
       } catch (e) {
-        setSimNote(`LA fire model unavailable (${errorText(e)}), so this run used the in-browser model.`);
+        const model = h === "flood" ? "River flood model" : "LA fire model";
+        setSimNote(`${model} unavailable (${errorText(e)}), so this run used the simpler in-browser model.`);
       }
     }
     return { sim: { result: runSimulation(h, tr, p, o), grid: tr }, source: "browser" as const };
@@ -354,7 +358,7 @@ export function Simulator() {
                   )}–${Math.round(terrain.maxElev)} m`
                 : "Loading elevation and imagery…"}
             {terrain?.demSource === "synthetic" && " · elevation tiles unavailable, using synthetic terrain"}
-            {useBackend && " · wildfire runs on the LA maps (USGS 3DEP elevation, NLCD 2021 land cover)"}
+            {hazard === "wildfire" && useBackend && " · wildfire runs on the LA maps (USGS 3DEP elevation, NLCD 2021 land cover)"}
           </p>
         </section>
 
@@ -392,8 +396,10 @@ export function Simulator() {
                 </>
               ) : (
                 <>
-                  <span><b className="text-zinc-100">Rainfall:</b> how hard it rains over the whole area. Some soaks in; the rest flows downhill and pools in low ground.</span>
-                  <span><b className="text-zinc-100">Soil saturation:</b> how wet the ground already is. Wetter ground soaks up less, so more water floods.</span>
+                  <span><b className="text-zinc-100">Rainfall:</b> average intensity of the storm. It builds to a peak, then eases off. Paved ground sheds most of it; forest soaks more up.</span>
+                  <span><b className="text-zinc-100">Storm duration:</b> how long it rains. Total rain is intensity × duration.</span>
+                  <span><b className="text-zinc-100">Soil saturation:</b> how wet the ground already is. It gets wetter as the storm goes on, so later rain runs off faster.</span>
+                  <span>Runoff drains into the rivers (teal). Once a river is over its banks it spills onto the floodplain (blue).</span>
                 </>
               )}
             </InfoTip>
@@ -550,7 +556,7 @@ export function Simulator() {
             {viewRun ? (
               <>
                 Run {viewRun.id} · {HAZARDS[viewRun.hazard].label} · {describeParams(viewRun.hazard, viewRun.params)}
-                {viewRun.source === "backend" && " · LA maps"}
+                {viewRun.source === "backend" && (viewRun.hazard === "flood" ? " · river routing" : " · LA maps")}
               </>
             ) : (
               "No simulation shown. Set conditions and press Generate."
@@ -655,7 +661,7 @@ function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean })
   const items =
     hazard === "wildfire"
       ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
-      : [["#5abeff", "Shallow (0.15 m+)"], ["#0a46d7", "Deep (2.5 m+)"]];
+      : [["#2dd4bf", "River (within its banks)"], ["#5abeff", "Flood, shallow (0.15 m+)"], ["#0a46d7", "Flood, deep (2.5 m+)"]];
   return (
     <div className="pointer-events-none absolute bottom-8 right-3 z-10 flex flex-col gap-1 rounded-lg bg-zinc-950/80 px-3 py-2 text-xs text-zinc-200 backdrop-blur">
       {items.map(([c, l]) => (

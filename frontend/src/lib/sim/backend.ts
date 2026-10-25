@@ -1,6 +1,6 @@
 import { api } from "@/lib/api";
 import { lngLatToCell } from "./terrain";
-import { FRAME_COUNT, FRAMES_PER_HOUR, type Bounds, type LngLat, type Params, type SimResult, type Terrain } from "./types";
+import { FLOOD_MIN, FRAME_COUNT, FRAMES_PER_HOUR, type Bounds, type LngLat, type Params, type SimResult, type Terrain } from "./types";
 
 /** Mainland LA County: the backend has real elevation (USGS 3DEP) and land cover (NLCD 2021) here. */
 export const LA_FIRE_BOUNDS: Bounds = { west: -118.95, south: 33.7, east: -117.64, north: 34.83 };
@@ -19,6 +19,50 @@ function decodeFrame(b64: string) {
   const out = new Uint8Array(bin.length);
   for (let k = 0; k < bin.length; k++) out[k] = bin.charCodeAt(k);
   return out;
+}
+
+function toBase64(bytes: Uint8Array) {
+  let bin = "";
+  for (let k = 0; k < bytes.length; k += 0x8000) bin += String.fromCharCode(...bytes.subarray(k, k + 0x8000));
+  return btoa(bin);
+}
+
+/** Hours until each cell first reaches `min` (Infinity if it never does). */
+function arrivalTimes(frames: Uint8Array[], min: number) {
+  const arrival = new Float32Array(frames[0]?.length ?? 0).fill(Infinity);
+  frames.forEach((f, i) => {
+    for (let k = 0; k < f.length; k++) if (f[k] >= min && arrival[k] === Infinity) arrival[k] = i / FRAMES_PER_HOUR;
+  });
+  return arrival;
+}
+
+/**
+ * Runs the river-routing flood model in backend/flood.py on this place's grid:
+ * runoff drains into channels and spills onto the floodplain once they're over their banks.
+ */
+export async function runBackendFlood(t: Terrain, p: Params): Promise<{ result: SimResult; grid: Terrain }> {
+  const n = t.w * t.h;
+  const cover = new Uint8Array(n);
+  const runoff = new Uint8Array(n);
+  for (let k = 0; k < n; k++) {
+    cover[k] = t.sea[k] ? 2 : t.water[k] ? 1 : 0;
+    runoff[k] = Math.round(Math.min(1, Math.max(0, t.runoff[k])) * 255);
+  }
+  const res = await api.flood.simulate({
+    w: t.w,
+    h: t.h,
+    cell_m: t.cellM,
+    elevation: toBase64(new Uint8Array(t.elev.buffer, t.elev.byteOffset, t.elev.byteLength)),
+    cover: toBase64(cover),
+    runoff: toBase64(runoff),
+    rainfall_mm_h: p.rainfall,
+    storm_hours: p.stormHours,
+    saturation: p.saturation,
+    num_frames: FRAME_COUNT - 1,
+    minutes_per_frame: 60 / FRAMES_PER_HOUR,
+  });
+  const frames = res.frames.map(decodeFrame);
+  return { result: { frames, arrival: arrivalTimes(frames, FLOOD_MIN), area: res.area }, grid: t };
 }
 
 /**
@@ -45,12 +89,8 @@ export async function runBackendWildfire(
     seed,
   });
   const frames = res.frames.map(decodeFrame);
-  const arrival = new Float32Array(res.w * res.h).fill(Infinity);
-  frames.forEach((f, i) => {
-    for (let k = 0; k < f.length; k++) if (f[k] && arrival[k] === Infinity) arrival[k] = i / FRAMES_PER_HOUR;
-  });
   return {
-    result: { frames, arrival, area: res.area },
+    result: { frames, arrival: arrivalTimes(frames, 1), area: res.area },
     grid: { ...t, bounds: res.bounds, w: res.w, h: res.h, cellM: res.cellM },
   };
 }

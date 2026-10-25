@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from rasterio.features import shapes, sieve
 from rasterio.transform import from_bounds
 
+import flood
 from api import tiger
 
 router = APIRouter(prefix="/runs", tags=["runs"])
@@ -88,6 +89,11 @@ class RunStats(BaseModel):
     summary: dict[str, float]
 
 
+def _storm_hours(params: dict[str, float]) -> float:
+    # Runs saved before storms had a duration rained for the whole day.
+    return params.get("stormHours", 24.0)
+
+
 def _tiger(fn, *args):
     try:
         return fn(*args)
@@ -151,9 +157,10 @@ def create_run(data: RunCreate):
         })
 
     rain = data.params.get("rainfall", 0.0) if data.hazard == "flood" else 0.0
+    storm = _storm_hours(data.params)
     stats = [
         {"hour": i / data.frames_per_hour, "area_km2": area, "active_km2": active,
-         "rain_mm": rain * i / data.frames_per_hour}
+         "rain_mm": flood.rain_total(i / data.frames_per_hour, rain, storm)}
         for i, (area, active) in enumerate(zip(data.area_km2, data.active_km2))
     ]
 
@@ -225,5 +232,9 @@ def get_stats(run_id: int):
                 "hours_spreading": float(len(spreading)),
             }
         else:
-            summary |= {"total_rain_mm": final.rain_mm, "rain_rate_mm_h": run["params"].get("rainfall", 0.0)}
+            summary |= {
+                "total_rain_mm": final.rain_mm,
+                "rain_rate_mm_h": run["params"].get("rainfall", 0.0),
+                "storm_hours": _storm_hours(run["params"]),
+            }
     return RunStats(hazard=run["hazard"], hourly=hourly, summary=summary)

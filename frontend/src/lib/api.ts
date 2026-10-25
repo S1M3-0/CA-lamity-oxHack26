@@ -36,6 +36,29 @@ export type FireResult = {
   area: number[];
 };
 
+/** Keep in sync with backend/api/routes/flood.py. Grids are base64, row 0 north. */
+export type FloodRequest = {
+  w: number;
+  h: number;
+  cell_m: number;
+  /** float32 little-endian metres */
+  elevation: string;
+  /** uint8 per cell: 0 land, 1 river or lake, 2 sea */
+  cover: string;
+  /** uint8 per cell: share of rain running off dry ground, 0..255 */
+  runoff: string;
+  /** average over the storm */
+  rainfall_mm_h: number;
+  storm_hours: number;
+  /** % */
+  saturation: number;
+  num_frames?: number;
+  minutes_per_frame?: number;
+};
+
+/** Frames use 0 dry, 1..39 water inside a river channel, 40..255 flood depth. */
+export type FloodResult = Omit<FireResult, "bounds">;
+
 /** A generated run as stored in Tiger Data. Keep in sync with backend/api/routes/runs.py. */
 export type SavedRun = {
   id: number;
@@ -129,6 +152,10 @@ export const api = {
   fire: {
     la: (data: LaFireRequest) =>
       request<FireResult>("/fire/la", { method: "POST", body: JSON.stringify(data) }),
+  },
+  flood: {
+    simulate: (data: FloodRequest) =>
+      request<FloodResult>("/flood/simulate", { method: "POST", body: JSON.stringify(data) }),
   },
   runs: {
     list: (limit: number) => request<SavedRun[]>(`/runs?limit=${limit}`),
