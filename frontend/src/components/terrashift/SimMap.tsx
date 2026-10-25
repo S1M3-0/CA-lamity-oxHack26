@@ -3,7 +3,7 @@
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
-import { api, type MapGeoJSON, type SafePoint } from "@/lib/api";
+import { api, type MapGeoJSON, type ResponderRoute, type SafePoint } from "@/lib/api";
 import { compass, renderFrame, type Hazard, type LngLat, type Terrain } from "@/lib/sim";
 
 export type Basemap = "satellite" | "streets";
@@ -16,6 +16,8 @@ type Props = {
   origin: LngLat | null;
   /** evacuation centres to pin for the hour being shown */
   safePoints: SafePoint[];
+  /** responders' fastest safe road route for the hour being shown (wildfires only), drawn in red */
+  route: ResponderRoute | null;
   basemap: Basemap;
   terrain3d: boolean;
   onMapClick?: (lngLat: LngLat) => void;
@@ -77,6 +79,20 @@ const STYLE: StyleSpecification = {
 const EMPTY_PNG =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 const EMPTY_GEOJSON: MapGeoJSON = { type: "FeatureCollection", features: [] };
+/** keep in sync with --color-route in globals.css (MapLibre paint can't read CSS variables) */
+const ROUTE_RED = "#d32f2f";
+
+const STATION_LABEL: Record<string, string> = {
+  fire_station: "Fire station",
+  police: "Police station",
+  ambulance_station: "Ambulance station",
+};
+
+function routeTitle(r: ResponderRoute) {
+  const head = `${STATION_LABEL[r.station.kind] ?? r.station.kind}: ${r.station.name}`;
+  const trip = `${(r.distance_m / 1000).toFixed(1)} km · ${Math.max(1, Math.round(r.travel_s / 60))} min drive`;
+  return `${head} · ${trip}`;
+}
 
 function corners(t: Terrain): [[number, number], [number, number], [number, number], [number, number]] {
   const { west, east, north, south } = t.bounds;
@@ -97,6 +113,7 @@ export function SimMap(props: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const markersRef = useRef<Marker[]>([]);
   const safeMarkersRef = useRef<Marker[]>([]);
+  const routeMarkersRef = useRef<Marker[]>([]);
   const fittedKeyRef = useRef<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -138,6 +155,22 @@ export function SimMap(props: Props) {
           type: "line",
           source: "la-aoi",
           paint: { "line-color": "#38bdf8", "line-width": 2.5 },
+        });
+        // White casing under the red line so the route reads on imagery, fire and floodwater alike.
+        map.addSource("route", { type: "geojson", data: EMPTY_GEOJSON });
+        map.addLayer({
+          id: "route-casing",
+          type: "line",
+          source: "route",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": "#ffffff", "line-width": 8, "line-opacity": 0.9 },
+        });
+        map.addLayer({
+          id: "route-line",
+          type: "line",
+          source: "route",
+          layout: { "line-join": "round", "line-cap": "round" },
+          paint: { "line-color": ROUTE_RED, "line-width": 4.5 },
         });
         loadedRef.current = true;
         applyAll();
@@ -216,6 +249,41 @@ export function SimMap(props: Props) {
     });
   }
 
+  function applyRoute() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib || !loadedRef.current) return;
+    routeMarkersRef.current.forEach((m) => m.remove());
+    routeMarkersRef.current = [];
+    const { route } = propsRef.current;
+    const src = map.getSource("route") as GeoJSONSource | undefined;
+    // A one-point path means the station already sits at the target: markers only, no line.
+    src?.setData(
+      route && route.path.length > 1
+        ? { type: "FeatureCollection", features: [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: route.path } }] }
+        : EMPTY_GEOJSON,
+    );
+    if (!route) return;
+
+    // red square with a white cross for the station the crew leaves from
+    const station = markerEl(
+      "flex size-7 cursor-help items-center justify-center rounded-md border-[3px] border-white bg-route shadow-[0_3px_10px_rgba(0,0,0,0.7)]",
+    );
+    station.innerHTML =
+      '<svg viewBox="0 0 24 24" class="size-3.5" fill="white" aria-hidden="true"><path d="M9.5 3h5v6.5H21v5h-6.5V21h-5v-6.5H3v-5h6.5z"/></svg>';
+    station.title = routeTitle(route);
+    // red ring where the route ends: people the fire is about to reach, or its edge
+    const target = markerEl("size-5 cursor-help rounded-full border-4 border-route bg-white shadow-[0_3px_10px_rgba(0,0,0,0.7)]");
+    target.title =
+      route.goal === "people"
+        ? `Street the ${route.target.hazard_eta_h !== null ? `fire reaches at T+${route.target.hazard_eta_h.toFixed(2)}h` : "fire reaches next"}`
+        : "Nearest open road to the fire's edge";
+    routeMarkersRef.current = [
+      new lib.Marker({ element: station }).setLngLat([route.station.lon, route.station.lat]).addTo(map),
+      new lib.Marker({ element: target }).setLngLat([route.target.lon, route.target.lat]).addTo(map),
+    ];
+  }
+
   function applyStyleToggles() {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
@@ -240,6 +308,7 @@ export function SimMap(props: Props) {
     applyAoi();
     applyMarkers();
     applySafePoints();
+    applyRoute();
     applyStyleToggles();
   }
 
@@ -280,6 +349,7 @@ export function SimMap(props: Props) {
   useEffect(applyCamera, [props.terrain, props.center]);
   useEffect(applyMarkers, [props.origin, props.hazard]);
   useEffect(applySafePoints, [props.safePoints]);
+  useEffect(applyRoute, [props.route]);
   useEffect(applyStyleToggles, [props.basemap, props.terrain3d]);
 
   return (

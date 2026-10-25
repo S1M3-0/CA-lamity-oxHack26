@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, type RunStats, type SafePoint, type SavedRun } from "@/lib/api";
+import { api, type ResponderRoute, type RunStats, type SafePoint, type SavedRun } from "@/lib/api";
 import { buildRunCreate } from "@/lib/runs";
 import {
   DEFAULT_PARAMS,
@@ -12,6 +12,7 @@ import {
   backendCoversFire,
   compass,
   describeParams,
+  fetchResponderRoutes,
   loadTerrain,
   lngLatToCell,
   runBackendFlood,
@@ -26,7 +27,7 @@ import {
   type Terrain,
   type WeatherDay,
 } from "@/lib/sim";
-import { conditionsAtHour, weatherRainTotal } from "@/lib/sim/weather";
+import { conditionsAtHour } from "@/lib/sim/weather";
 import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 import { Icon, type IconName } from "./Icon";
 import { InfoTip } from "./InfoTip";
@@ -56,6 +57,10 @@ type Run = {
   stats: RunStats | null;
   /** why this run isn't saved or its safe points / stats are missing */
   note: string | null;
+  /** responders' fastest safe route for each hour, planned once the frames exist */
+  routes: ResponderRoute[] | null;
+  /** route planning status or failure */
+  routesNote: string | null;
 };
 
 const PRESETS: Place[] = [
@@ -89,7 +94,25 @@ function fromSaved(s: SavedRun, id: number): Run {
     safePoints: null,
     stats: null,
     note: null,
+    routes: null,
+    routesNote: null,
   };
+}
+
+const STATION_LABEL: Record<string, string> = {
+  fire_station: "Fire station",
+  police: "Police",
+  ambulance_station: "Ambulance",
+};
+
+/** One line describing the hour's responder route (wildfires only) for the timeline. */
+function describeRoute(r: ResponderRoute) {
+  const from = `${STATION_LABEL[r.station.kind] ?? r.station.kind} · ${r.station.name}`;
+  const trip = `${(r.distance_m / 1000).toFixed(1)} km, ${Math.max(1, Math.round(r.travel_s / 60))} min`;
+  if (r.goal === "front") return r.distance_m < 50 ? `${from} is already at the edge of the fire` : `${from} → edge of the fire · ${trip}`;
+  const spare = Math.round((r.spare_s ?? 0) / 60);
+  const timing = spare >= 0 ? `arrives ${spare} min before the fire` : `arrives ${-spare} min after the fire`;
+  return `${from} → ${r.target.residential ? "homes" : "a street"} in the fire's path · ${trip} · ${timing}`;
 }
 
 function formatT(hours: number) {
@@ -128,12 +151,16 @@ export function Simulator() {
   /** set once the user generates, so restoring saved runs doesn't overwrite their choices */
   const touched = useRef(false);
   const resimulating = useRef(new Set<number>());
+  /** runs whose responder routes are being fetched, so a replay doesn't start a second fetch */
+  const loadingRoutes = useRef(new Set<number>());
 
   const key = terrainKey(place.center);
   const terrain = terrains[key] ?? null;
   const weatherMatchesPlace = weather?.latitude === place.center[1] && weather?.longitude === place.center[0];
-  const weatherReady = weatherMode === "manual" || (weatherMatchesPlace && !weatherLoading && !weatherError);
-  const simulationParams: Params = weatherMode !== "manual" && weatherMatchesPlace && weather
+  /** Yesterday's (or a loaded scenario's) hourly weather drives wildfires only; floods always use the manual sliders. */
+  const weatherOn = hazard === "wildfire" && weatherMode !== "manual";
+  const weatherReady = !weatherOn || (weatherMatchesPlace && !weatherLoading && !weatherError);
+  const simulationParams: Params = weatherOn && weatherMatchesPlace && weather
     ? { ...params, weather }
     : params;
   const activeRun = runs.find((r) => r.id === activeId) ?? null;
@@ -145,12 +172,13 @@ export function Simulator() {
     () => viewRun?.safePoints?.filter((p) => p.hour === hour) ?? [],
     [viewRun?.safePoints, hour],
   );
+  const hourRoute = useMemo(() => viewRun?.routes?.find((r) => r.hour === hour) ?? null, [viewRun?.routes, hour]);
   const meta = HAZARDS[hazard];
   const missingOrigin = meta.originLabel !== null && origin === null;
   const useBackend = hazard === "flood" || (hazard === "wildfire" && terrain !== null && backendCoversFire(terrain));
 
   useEffect(() => {
-    if (weatherMode !== "yesterday") return;
+    if (hazard !== "wildfire" || weatherMode !== "yesterday") return;
     const controller = new AbortController();
     setWeather(null);
     setWeatherLoading(true);
@@ -160,7 +188,7 @@ export function Simulator() {
       .catch((e) => { if (!controller.signal.aborted) setWeatherError(errorText(e)); })
       .finally(() => { if (!controller.signal.aborted) setWeatherLoading(false); });
     return () => controller.abort();
-  }, [weatherMode, place.center[0], place.center[1], weatherReload]);
+  }, [hazard, weatherMode, place.center[0], place.center[1], weatherReload]);
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -221,6 +249,7 @@ export function Simulator() {
     simulateRun(r.hazard, terrain, r.params, r.origin, r.seed, r.source === "backend").then(({ sim }) => {
       updateRun(r.id, { sim });
       setComputing(false);
+      if (!r.routes) void loadRoutes(r.id, r.hazard, sim);
       if (r.dbId !== null && (!r.stats || !r.safePoints)) void loadResults(r.id, r.dbId);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -271,6 +300,26 @@ export function Simulator() {
     });
   }
 
+  /**
+   * Plan responders' routes for every hour of a wildfire (floods don't get them).
+   * The first run in a new area downloads its roads, which can take a minute.
+   */
+  async function loadRoutes(id: number, h: Hazard, sim: Sim) {
+    if (h !== "wildfire" || loadingRoutes.current.has(id)) return;
+    loadingRoutes.current.add(id);
+    updateRun(id, { routesNote: "Planning responder routes…" });
+    try {
+      const routes = await fetchResponderRoutes(sim.grid, sim.result, () =>
+        updateRun(id, { routesNote: "Downloading this area's roads and stations for responder routes (first run here only)…" }),
+      );
+      updateRun(id, { routes, routesNote: routes.length ? null : "No road route reaches the hazard from a nearby station." });
+    } catch (e) {
+      updateRun(id, { routesNote: `Responder routes unavailable: ${errorText(e)}. Generate again to retry.` });
+    } finally {
+      loadingRoutes.current.delete(id);
+    }
+  }
+
   function changePlace(p: Place) {
     if (terrainKey(p.center) !== key) setOrigin(null);
     if (weatherMode === "saved") setWeatherMode("yesterday");
@@ -284,7 +333,8 @@ export function Simulator() {
     const seed = runSeed(hazard, terrain, simulationParams, o);
     const existing = runs.find((r) => r.seed === seed && r.key === key);
     if (existing) {
-      // same conditions → same (reproducible) simulation; just replay it
+      // same conditions → same (reproducible) simulation; just replay it, retrying routes if they failed
+      if (existing.sim && !existing.routes) void loadRoutes(existing.id, existing.hazard, existing.sim);
       setActiveId(existing.id);
       setT(0);
       setPlaying(true);
@@ -298,7 +348,7 @@ export function Simulator() {
       const { sim, source } = await simulateRun(hazard, terrain, simulationParams, o, seed, useBackend);
       const run: Run = {
         id: nextId.current++, dbId: null, seed, hazard, place, key, params: simulationParams, origin: o, source, sim,
-        safePoints: null, stats: null, note: null,
+        safePoints: null, stats: null, note: null, routes: null, routesNote: null,
       };
       setRuns((old) => [run, ...old].slice(0, MAX_RUNS));
       setActiveId(run.id);
@@ -306,6 +356,7 @@ export function Simulator() {
       setPlaying(true);
       setComputing(false);
       void save(run, sim);
+      void loadRoutes(run.id, hazard, sim);
     }, 30);
   }
 
@@ -354,7 +405,7 @@ export function Simulator() {
 
   const area = viewSim ? viewSim.result.area[frameIdx] : 0;
   const runStatus = viewRun ? viewRun.note ?? (viewRun.dbId === null ? "Saving to Tiger Data…" : null) : null;
-  const shownWeather = viewRun ? viewRun.params.weather : (weatherMode !== "manual" && weatherMatchesPlace ? weather : null);
+  const shownWeather = viewRun ? viewRun.params.weather : (weatherOn && weatherMatchesPlace ? weather : null);
   const shownConditions = conditionsAtHour(shownWeather ? { ...params, weather: shownWeather } : params, viewRun ? t : 0);
 
   return (
@@ -438,24 +489,26 @@ export function Simulator() {
               )}
             </InfoTip>
           </h2>
-          <label className="flex flex-col gap-1.5 text-sm">
-            <span className="font-medium">Weather source</span>
-            <select
-              value={weatherMode}
-              onChange={(e) => {
-                touched.current = true;
-                setWeatherMode(e.target.value as "manual" | "yesterday" | "saved");
-                setWeatherError(null);
-                setWeatherLoading(false);
-              }}
-              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100"
-            >
-              <option value="manual">Manual conditions</option>
-              <option value="yesterday">Yesterday’s weather at this location</option>
-              {weatherMode === "saved" && <option value="saved">Loaded scenario’s hourly weather</option>}
-            </select>
-          </label>
-          {weatherMode !== "manual" && (
+          {hazard === "wildfire" && (
+            <label className="flex flex-col gap-1.5 text-sm">
+              <span className="font-medium">Weather source</span>
+              <select
+                value={weatherMode}
+                onChange={(e) => {
+                  touched.current = true;
+                  setWeatherMode(e.target.value as "manual" | "yesterday" | "saved");
+                  setWeatherError(null);
+                  setWeatherLoading(false);
+                }}
+                className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100"
+              >
+                <option value="manual">Manual conditions</option>
+                <option value="yesterday">Yesterday’s weather at this location</option>
+                {weatherMode === "saved" && <option value="saved">Loaded scenario’s hourly weather</option>}
+              </select>
+            </label>
+          )}
+          {weatherOn && (
             <div className="flex flex-col gap-2 rounded-lg border border-zinc-700 bg-zinc-900 p-3 text-xs text-zinc-200" aria-live="polite">
               {weatherLoading || (!weather && !weatherError) ? <p>Loading yesterday’s hourly weather for {place.name}…</p> : weatherError ? (
                 <>
@@ -465,10 +518,9 @@ export function Simulator() {
               ) : weather && weatherMatchesPlace ? (
                 <>
                   <p className="font-medium">{weather.date} · {weather.timezone} · 00:00–24:00</p>
-                  <p>Wind and humidity change hourly. Floods use each hour’s liquid rainfall. Soil saturation stays manual.</p>
-                  <p>{weatherRainTotal({ ...params, weather }, 24).toFixed(1)} mm rain over the day</p>
+                  <p>The fire’s wind speed, wind direction and humidity change every hour.</p>
                   {weather.dayHours && weather.dayHours !== 24 && (
-                    <p>This local day had {weather.dayHours} hours. The 24-hour timeline combines repeated hours or fills a skipped hour, preserving the day’s rain total.</p>
+                    <p>This local day had {weather.dayHours} hours. The 24-hour timeline combines repeated hours or fills a skipped hour.</p>
                   )}
                   <a className="underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Modelled weather by Open-Meteo</a>
                 </>
@@ -477,7 +529,7 @@ export function Simulator() {
           )}
           {meta.params.map((k) => {
             const pm = PARAM_META[k];
-            if (weatherMode !== "manual" && k !== "saturation") return null;
+            if (weatherOn) return null;
             return (
               <label key={k} className="flex flex-col gap-1.5">
                 <span className="flex items-center justify-between text-sm">
@@ -646,6 +698,7 @@ export function Simulator() {
             frame={viewSim?.result.frames[frameIdx] ?? null}
             origin={meta.originLabel ? (viewRun ? viewRun.origin : origin) : null}
             safePoints={viewSim ? hourSafePoints : []}
+            route={viewSim ? hourRoute : null}
             basemap={basemap}
             terrain3d={terrain3d}
             onMapClick={(ll) => {
@@ -666,7 +719,7 @@ export function Simulator() {
               Running cellular automaton…
             </div>
           )}
-          {viewSim && <Legend hazard={viewRun!.hazard} safePoints={hourSafePoints.length > 0} />}
+          {viewSim && <Legend hazard={viewRun!.hazard} safePoints={hourSafePoints.length > 0} route={hourRoute !== null} />}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3">
@@ -675,7 +728,14 @@ export function Simulator() {
               {shownWeather.date} · {shownWeather.timezone} · {String(Math.floor(viewRun ? t : 0)).padStart(2, "0")}:{String(Math.round(((viewRun ? t : 0) % 1) * 60)).padStart(2, "0")}
               {" · "}{shownConditions.windSpeed.toFixed(1)} km/h {compass(shownConditions.windDir)} wind
               {" · "}{shownConditions.humidity.toFixed(0)}% humidity
-              {" · "}{shownConditions.rainfall.toFixed(1)} mm/h rain
+              {/* only flood runs saved before weather became wildfire-only carry hourly rain */}
+              {viewRun?.hazard === "flood" && <>{" · "}{shownConditions.rainfall.toFixed(1)} mm/h rain</>}
+            </p>
+          )}
+          {viewSim && (hourRoute || viewRun?.routesNote) && (
+            <p className="flex items-center gap-2 text-xs text-zinc-300" aria-live="polite">
+              <span className="h-1 w-5 shrink-0 rounded-full bg-route" aria-hidden="true" />
+              {hourRoute ? describeRoute(hourRoute) : viewRun!.routesNote}
             </p>
           )}
           <div className="flex flex-wrap items-center gap-2">
@@ -748,7 +808,7 @@ export function Simulator() {
   );
 }
 
-function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean }) {
+function Legend({ hazard, safePoints, route }: { hazard: Hazard; safePoints: boolean; route: boolean }) {
   const items =
     hazard === "wildfire"
       ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
@@ -766,6 +826,18 @@ function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean })
           <span className="size-4 rounded-full border-2 border-white bg-safe" />
           Safe point (evacuation centre)
         </span>
+      )}
+      {route && (
+        <>
+          <span className="flex items-center gap-2">
+            <span className="h-1 w-4 rounded-full bg-route outline outline-2 outline-white" />
+            Responder route (fastest road clear of the hazard)
+          </span>
+          <span className="flex items-center gap-2">
+            <span className="size-3.5 rounded-sm border-2 border-white bg-route" />
+            Fire, police or ambulance station
+          </span>
+        </>
       )}
     </div>
   );

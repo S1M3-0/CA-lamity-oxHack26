@@ -5,7 +5,7 @@ import { FLOOD_MIN, type Hazard, type LngLat, type Params, type SimResult, type 
 
 export * from "./types";
 export { loadTerrain, lngLatToCell, cellToLngLat, terrainKey } from "./terrain";
-export { backendCoversFire, runBackendFlood, runBackendWildfire } from "./backend";
+export { backendCoversFire, fetchResponderRoutes, runBackendFlood, runBackendWildfire } from "./backend";
 
 export type ParamKey = Exclude<keyof Params, "weather">;
 

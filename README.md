@@ -15,6 +15,7 @@ Repo: https://github.com/S1M3-0/CA-lamity-oxHack26
   - **Where the water goes:** runoff drains downhill into river channels. Rivers rise (teal), then spill onto the floodplain (blue) once they're over their banks.
   - **What changes how much runs off:** paved ground sheds rain, forest soaks it up, and the soil gets wetter as the storm goes on.
 - **Evacuation safe points.** For every simulated hour, the app checks 8 compass directions around the disaster. In each one it pins the nearest school, college, community centre or shelter that the disaster never comes near during the run. The centres come from OpenStreetMap.
+- **Responder routes (wildfire only).** For every simulated hour of a wildfire, a red line shows the fastest road route from the nearest fire, police or ambulance station. It goes to the people the fire reaches next, and it never drives through the fire. See [Responder routes](#responder-routes).
 - **Statistics.** After a run, the Statistics panel shows totals and an hourly chart:
   - **Fire:** area burned, fastest and average spread, and peak burning area.
   - **Flood:** total rainfall, peak flooded area and deep-water area.
@@ -30,6 +31,7 @@ These are illustrations, not forecasts. The models are simplified and uncalibrat
 | `backend/CA.py` | Wildfire automaton (numpy). Each burning cell can ignite its 8 neighbours. The chance depends on fuel, humidity, wind and slope (after Alexandridis et al., 2008). |
 | `backend/flood.py` | Flood automaton. It carves rivers into the elevation and fills pits so water always drains, computes flow directions and upstream area, sizes each channel to its catchment, routes runoff downhill at Manning speeds, and spreads overbank water across the floodplain. |
 | `backend/fire_maps.py` | Crops, downsamples and caches the LA elevation and land-cover maps. |
+| `backend/routing.py` | Responder routing. It builds a junction-to-junction road graph from OpenStreetMap, closes each road at the hour the hazard reaches it, and runs a time-dependent Dijkstra from every station. |
 | `backend/api/tiger.py` | Tiger Data storage. A hypertable holds each hour's outline of the affected area, another holds per-frame statistics, and PostGIS runs the evacuation-centre queries. |
 | `frontend/src/lib/sim/` | Loads terrain in the browser (elevation tiles, plus land cover from OSM tiles), draws frames, and holds fallback in-browser models. |
 
@@ -47,6 +49,8 @@ backend/                     FastAPI
   api/routes/fire.py         POST /api/fire/la, /api/fire/simulate
   api/routes/flood.py        POST /api/flood/simulate
   api/routes/runs.py         saved runs, /safe-points, /stats
+  routing.py                 responder routing (road graph, time-dependent Dijkstra)
+  api/routes/responders.py   POST /api/responders/routes, OSM roads and stations (cached)
   data/maps/                 LA rasters (not in git, see below)
   requirements.txt
 frontend/                    Next.js (App Router) + Tailwind CSS v4 + MapLibre
@@ -93,15 +97,28 @@ The rasters are too big for git. Put them in `backend/data/maps/`:
 
 Without them, wildfires inside LA fall back to the in-browser model. Floods don't need them.
 
+## Responder routes
+
+After a wildfire run, the backend plans one route per simulated hour for fire crews and local authorities. Flood runs don't get routes. The map draws the route in red, with a red square for the station and a red ring for the destination. The line under the timeline names the station and gives the distance, the drive time, and how long before the fire the crew arrives.
+
+- **Roads and stations.** These come from OpenStreetMap: fire stations, police stations and ambulance stations, plus every drivable road inside the simulated area and the main roads up to about 5 km beyond it. They're fetched once per area and cached in `backend/data/cache`. The first run for a new city can take about 40 seconds; after that a run takes under a second.
+- **Roads close as the fire arrives.** Each road segment closes at the simulated hour the fire first comes within one cell of it. A route can only use a segment the crew will be off before it closes, so it never drives through the hazard. One-way streets are respected.
+- **Where the route goes.** The route goes to a street the fire reaches in the next 2 hours, preferring residential streets because that's where people are. Of those, it picks the most urgent one a crew can still reach first; if none can be reached in time, the one reached soonest after the fire. When no street is in the path, for example a fire in roadless hills, it goes to the open road nearest the fire's edge.
+- **No database needed.** The browser sends the run's arrival grid, so routes also work for in-browser runs and without `DATABASE_URL`.
+
+Speeds are typical emergency-driving guesses per road type, not live traffic, and the route is only as good as the simplified hazard model. Run `python -m unittest discover -s tests -v` from `backend/` for the routing checks.
+
 ## Yesterday's weather
 
-Under **Environmental conditions → Weather source**, select **Yesterday’s weather at this location**. The app fetches yesterday's modelled hourly wind speed, wind direction, relative humidity and liquid rainfall from [Open-Meteo](https://open-meteo.com/en/docs), using the selected place's coordinates and local timezone. No API key is needed for the public API.
+This is for wildfires only. Floods always use the manual rainfall, storm duration and soil saturation sliders.
 
-The simulation starts at local 00:00. Wildfire uses each hour's wind and humidity; floods use each hour's rain instead of the manual storm shape. Rain and showers are combined, with preceding-hour totals aligned to the correct simulation interval. Snowfall is excluded. Soil saturation remains a manual starting condition. Imported weather is modelled data, not station observations; choosing it does not detect whether a real disaster occurred.
+With **Wildfire** selected, go to **Environmental conditions → Weather source** and choose **Yesterday’s weather at this location**. The app fetches yesterday's modelled hourly wind speed, wind direction and relative humidity from [Open-Meteo](https://open-meteo.com/en/docs), using the selected place's coordinates and local timezone. No API key is needed for the public API.
 
-The timeline shows the date, timezone and hourly conditions. UTC timestamps are converted to the place's timezone to identify yesterday correctly across daylight-saving changes. On a 25-hour day, repeated clock hours are combined; on a 23-hour day, the skipped hour carries nearby wind and humidity with zero rain. The UI explains this normalization to the 24-hour timeline, and the day's rain total is preserved. Changing location reloads weather. If the provider fails or returns missing hours, generation waits until you retry or choose manual conditions. Selecting manual restores the adjustable sliders.
+The simulation starts at local 00:00, and the fire uses each hour's wind and humidity. Imported weather is modelled data, not station observations, and choosing it doesn't detect whether a real fire happened. (The backend flood model still accepts an hourly rain profile, so flood runs saved before this change replay exactly as they were.)
 
-Saved wildfire and flood runs include their weather profile in the existing JSON parameters, so replay uses the original hourly data without fetching a different day or changing the database schema. Loading a saved scenario labels its original weather date explicitly.
+The timeline shows the date, timezone and hourly conditions. UTC timestamps are converted to the place's timezone to identify yesterday correctly across daylight-saving changes. On a 25-hour day, repeated clock hours are combined; on a 23-hour day, the skipped hour carries nearby wind and humidity. The UI explains this normalization to the 24-hour timeline. Changing location reloads weather. If the provider fails or returns missing hours, generation waits until you retry or choose manual conditions. Selecting manual restores the adjustable sliders.
+
+Saved wildfire runs include their weather profile in the existing JSON parameters, so replay uses the original hourly data without fetching a different day or changing the database schema. Loading a saved scenario labels its original weather date explicitly.
 
 The backend endpoint is `GET /api/weather/yesterday?latitude=51.745&longitude=-1.255`. Run `npm run test:weather --workspace frontend` for the browser weather tests and, from `backend/` with its virtual environment active, `python -m unittest discover -s tests -v` for the backend checks.
 
@@ -124,3 +141,4 @@ The backend endpoint is `GET /api/weather/yesterday?latitude=51.745&longitude=-1
 - Every FastAPI route starts with `/api` (the router in `index.py` adds it). Don't put Next.js route handlers under `frontend/src/app/api`.
 - On Windows, `uvicorn --reload` sometimes logs "Reloading" but keeps serving old code. Restart `npm run dev` if backend changes don't seem to apply.
 - The first safe-point request for a new area fetches evacuation centres from OpenStreetMap, which can take a few seconds. After that they're cached in Tiger Data.
+- The first responder-route request for a new area downloads its roads from OpenStreetMap, which can take about a minute. That's longer than the Next.js proxy holds a request (30 s), so the backend downloads in the background and answers `202 preparing` until it's done. Meanwhile the browser asks again every 3 seconds and the timeline says it's downloading. If the main Overpass server is busy, two public mirrors are tried. On a deployed server, `backend/data/cache` must be writable.

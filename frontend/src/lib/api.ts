@@ -103,6 +103,37 @@ export type SafePoint = {
   distance_m: number;
 };
 
+/** Keep in sync with backend/api/routes/responders.py. */
+export type ResponderRouteRequest = {
+  /** edges of the grid the frames were simulated on */
+  bounds: Bounds;
+  w: number;
+  h: number;
+  frames_per_hour: number;
+  /** base64, one byte per cell, row 0 north: frame the hazard first reaches it, 255 = never */
+  arrival: string;
+};
+
+/** Fastest road route that avoids the hazard, from a fire, police or ambulance station, for one hour. */
+export type ResponderRoute = {
+  hour: number;
+  /** people: a street the hazard reaches in the next 2 h; front: the nearest open road to its edge */
+  goal: "people" | "front";
+  station: { name: string; kind: string; lon: number; lat: number };
+  target: { lon: number; lat: number; hazard_eta_h: number | null; residential: boolean };
+  travel_s: number;
+  distance_m: number;
+  /** how long before the hazard the crew arrives (negative: after it); null for the front */
+  spare_s: number | null;
+  /** [lon, lat] from the station to the target */
+  path: [number, number][];
+};
+
+/** 202 "preparing" while the backend downloads an area's roads for the first time: ask again shortly. */
+export type ResponderRoutesResult =
+  | { status: "ready"; routes: ResponderRoute[] }
+  | { status: "preparing"; detail: string };
+
 export type HourStat = {
   hour: number;
   area_km2: number;
@@ -169,6 +200,10 @@ export const api = {
     remove: (id: number) => request<void>(`/runs/${id}`, { method: "DELETE" }),
     safePoints: (id: number) => request<SafePoint[]>(`/runs/${id}/safe-points`),
     stats: (id: number) => request<RunStats>(`/runs/${id}/stats`),
+  },
+  responders: {
+    routes: (data: ResponderRouteRequest) =>
+      request<ResponderRoutesResult>("/responders/routes", { method: "POST", body: JSON.stringify(data) }),
   },
   items: {
     list: () => request<Item[]>("/items"),

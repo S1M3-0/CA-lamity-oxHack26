@@ -36,6 +36,33 @@ function arrivalTimes(frames: Uint8Array[], min: number) {
   return arrival;
 }
 
+/** How often to ask again while the backend downloads an area's roads, and for how long. */
+const ROUTES_POLL_MS = 3000;
+const ROUTES_GIVE_UP_MS = 4 * 60_000;
+
+/**
+ * Plans the hour-by-hour fastest safe route for responders in backend/routing.py:
+ * roads close as the hazard reaches them, so the route never drives through it.
+ * The first run in a new area waits while the backend downloads its roads;
+ * `onPreparing` is called each time it's still busy.
+ */
+export async function fetchResponderRoutes(grid: Terrain, result: SimResult, onPreparing?: (detail: string) => void) {
+  const arrival = new Uint8Array(result.arrival.length);
+  for (let k = 0; k < arrival.length; k++) {
+    const a = result.arrival[k];
+    arrival[k] = Number.isFinite(a) ? Math.min(254, Math.round(a * FRAMES_PER_HOUR)) : 255;
+  }
+  const body = { bounds: grid.bounds, w: grid.w, h: grid.h, frames_per_hour: FRAMES_PER_HOUR, arrival: toBase64(arrival) };
+  const giveUp = Date.now() + ROUTES_GIVE_UP_MS;
+  for (;;) {
+    const res = await api.responders.routes(body);
+    if (res.status === "ready") return res.routes;
+    if (Date.now() > giveUp) throw new Error("roads for this area are still downloading; try again later");
+    onPreparing?.(res.detail);
+    await new Promise((resolve) => setTimeout(resolve, ROUTES_POLL_MS));
+  }
+}
+
 /**
  * Runs the river-routing flood model in backend/flood.py on this place's grid:
  * runoff drains into channels and spills onto the floodplain once they're over their banks.

@@ -39,6 +39,8 @@
 
   /* evacuation safe points: a dark green so the marker stands out on the map */
   --color-safe: #2f7a1f;
+  /* responder route and its markers; keep in sync with ROUTE_RED in SimMap.tsx */
+  --color-route: #d32f2f;
 
   --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
 }
