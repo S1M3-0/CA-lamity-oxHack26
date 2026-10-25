@@ -1,9 +1,21 @@
-export type Hazard = "wildfire" | "flood" | "hurricane";
+export type Hazard = "wildfire" | "flood";
 
 /** [longitude, latitude] */
 export type LngLat = [number, number];
 
 export type Bounds = { west: number; south: number; east: number; north: number };
+
+export type WeatherHour = { windSpeed: number; windDir: number; humidity: number; rainfall: number };
+export type WeatherDay = {
+  date: string;
+  timezone: string;
+  source: "Open-Meteo";
+  latitude: number;
+  longitude: number;
+  /** Actual elapsed hours in the local day; DST days are normalized to 24 slots. */
+  dayHours?: number;
+  hours: WeatherHour[];
+};
 
 /** A square grid of cells sampled from real elevation + imagery around a place. Row 0 is north. */
 export type Terrain = {
@@ -19,8 +31,6 @@ export type Terrain = {
   fuel: Float32Array;
   /** 1 = sea level or below (acts as a sink for floods). */
   sea: Uint8Array;
-  /** Estimated residential cells from OSM map colours; absent when those tiles are unavailable. */
-  residential?: Uint8Array;
   /** 1 = mapped river or lake (OpenStreetMap), carved in as a flood channel. */
   water: Uint8Array;
   /** 0..1 share of rain that runs off dry ground (pavement high, forest low). */
@@ -45,13 +55,14 @@ export type Params = {
   stormHours: number;
   /** % */
   saturation: number;
+  /** Frozen hourly weather for reproducible playback and saved scenarios. */
+  weather?: WeatherDay;
 };
 
 /**
  * Per-frame cell values (0 = unaffected). Meaning per hazard:
  *  wildfire: 255 burning, 110 burnt
  *  flood: 40..255 scaled water depth; 1..39 water inside a river channel (not flooding)
- *  hurricane: 40..255 relative storm intensity; the eye is transparent
  */
 export type SimResult = {
   frames: Uint8Array[];
@@ -59,8 +70,6 @@ export type SimResult = {
   arrival: Float32Array;
   /** km² affected per frame */
   area: number[];
-  /** Hurricane eye position in grid coordinates for each frame, including outside the map. */
-  stormTrack?: { col: number; row: number }[];
 };
 
 export const HOURS = 24;

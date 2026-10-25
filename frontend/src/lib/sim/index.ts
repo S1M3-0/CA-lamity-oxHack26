@@ -1,5 +1,4 @@
 import { simulateFlood, simulateWildfire } from "./models";
-import { simulateHurricane } from "./hurricane";
 import { hashString } from "./rng";
 import { lngLatToCell } from "./terrain";
 import { FLOOD_MIN, type Hazard, type LngLat, type Params, type SimResult, type Terrain } from "./types";
@@ -7,9 +6,8 @@ import { FLOOD_MIN, type Hazard, type LngLat, type Params, type SimResult, type 
 export * from "./types";
 export { loadTerrain, lngLatToCell, cellToLngLat, terrainKey } from "./terrain";
 export { backendCoversFire, runBackendFlood, runBackendWildfire } from "./backend";
-export { buildResidentialWarnings, residentialAlertsAtFrame, type ResidentialAlert } from "./residential-warnings";
 
-export type ParamKey = keyof Params;
+export type ParamKey = Exclude<keyof Params, "weather">;
 
 export const HAZARDS: Record<
   Hazard,
@@ -26,12 +24,6 @@ export const HAZARDS: Record<
     params: ["rainfall", "stormHours", "saturation"],
     originLabel: null,
     blurb: "Storm runoff drains into rivers over real elevation, then spills onto the floodplain.",
-  },
-  hurricane: {
-    label: "Hurricane",
-    params: ["windSpeed", "windDir"],
-    originLabel: "Storm origin",
-    blurb: "Storm cells grow, break apart and dissipate while following the wind within ±15°. Size and travel are scaled to this local map.",
   },
 };
 
@@ -61,15 +53,18 @@ export function compass(deg: number) {
 }
 
 export function describeParams(hazard: Hazard, p: Params) {
-  if (hazard === "hurricane")
-    return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ±15° storm track`;
+  if (p.weather) return `${p.weather.date} hourly weather · ${p.weather.timezone}${hazard === "flood" ? ` · ${p.saturation}% soil` : ""}`;
   if (hazard === "wildfire")
     return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ${p.humidity}% RH`;
   return `${p.rainfall} mm/h for ${p.stormHours} h · ${p.saturation}% soil`;
 }
 
 export function runSeed(hazard: Hazard, t: Terrain, p: Params, origin: LngLat | null) {
-  return hashString(JSON.stringify([hazard, t.key, p, origin]));
+  // JSONB can reorder object keys. Normalize the profile before hashing a restored run.
+  const weather = p.weather;
+  const seedParams = weather ? { ...p, weather: [weather.date, weather.timezone, weather.latitude, weather.longitude,
+    weather.hours.map((h) => [h.windSpeed, h.windDir, h.humidity, h.rainfall])] } : p;
+  return hashString(JSON.stringify([hazard, t.key, seedParams, origin]));
 }
 
 export function runSimulation(
@@ -77,12 +72,13 @@ export function runSimulation(
   t: Terrain,
   p: Params,
   origin: LngLat | null,
+  savedSeed?: number,
 ): SimResult {
-  const seed = runSeed(hazard, t, p, origin);
+  const seed = savedSeed ?? runSeed(hazard, t, p, origin);
   const originCell = origin ? lngLatToCell(t, origin) : -1;
-  if (hazard === "wildfire" || hazard === "hurricane") {
+  if (hazard === "wildfire") {
     const start = originCell >= 0 ? originCell : (t.h >> 1) * t.w + (t.w >> 1);
-    return hazard === "hurricane" ? simulateHurricane(t, p, start, seed) : simulateWildfire(t, p, start, seed);
+    return simulateWildfire(t, p, start, seed);
   }
   return simulateFlood(t, p);
 }
@@ -108,9 +104,6 @@ export function renderFrame(
       if (hazard === "wildfire") {
         if (v === 255) { px[o] = 255; px[o + 1] = 120 + ((k * 7) % 60); px[o + 2] = 20; px[o + 3] = 240; }
         else { px[o] = 55; px[o + 1] = 18; px[o + 2] = 12; px[o + 3] = 175; }
-      } else if (hazard === "hurricane") {
-        const a = (v - 40) / 215;
-        px[o] = 120 + 120 * a; px[o + 1] = 75 + 155 * a; px[o + 2] = 235 + 20 * a; px[o + 3] = 60 + 195 * a;
       } else if (v < FLOOD_MIN) {
         // water still inside a river channel
         px[o] = 45; px[o + 1] = 212; px[o + 2] = 191; px[o + 3] = 170;

@@ -146,6 +146,7 @@ def simulate(
     num_frames: int = 100,
     steps_per_frame: int = 1,
     seed: int | None = None,
+    hourly_weather: list[dict[str, float]] | None = None,
 ) -> np.ndarray:
     """Run the automaton and return frames 0..num_frames as a (frames, rows, cols) uint8 array.
 
@@ -171,6 +172,7 @@ def simulate(
     burn_steps = np.maximum(derive_burn_steps(area_map), 1)
 
     probs = _spread_probabilities(fuel, elevation, cell_size, wind_direction, wind_speed, humidity)
+    weather_hour = -1
 
     state = np.full((rows, cols), UNBURNT, dtype=np.uint8)
     burn_left = np.zeros((rows, cols), dtype=np.int16)
@@ -182,6 +184,14 @@ def simulate(
     frames = np.empty((num_frames + 1, rows, cols), dtype=np.uint8)
     frames[0] = state
     for frame in range(1, num_frames + 1):
+        if hourly_weather:
+            # The app's 96 intervals span 24 hours; don't accelerate weather with CA steps.
+            hour = min(23, (frame - 1) // 4)
+            if hour != weather_hour:
+                weather_hour = hour
+                weather = hourly_weather[hour]
+                probs = _spread_probabilities(fuel, elevation, cell_size, weather["windDir"],
+                                              weather["windSpeed"] / 3.6, weather["humidity"])
         start_step = math.floor((frame - 1) * steps_per_frame * SPREAD_SPEED)
         end_step = math.floor(frame * steps_per_frame * SPREAD_SPEED)
         for _ in range(start_step, end_step):

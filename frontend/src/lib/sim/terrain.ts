@@ -181,7 +181,7 @@ function sampleLandCover(m: Mosaic, b: Bounds, i: number, j: number, w: number, 
   const x1 = Math.min(m.width, Math.max(x0 + 1, Math.round(lonToPx(lon1, TILE_ZOOM) - m.ox)));
   const y0 = Math.max(0, Math.floor(latToPx(lat0, TILE_ZOOM) - m.oy));
   const y1 = Math.min(m.height, Math.max(y0 + 1, Math.round(latToPx(lat1, TILE_ZOOM) - m.oy)));
-  let n = 0, known = 0, water = 0, residential = 0, fuel = 0, runoff = 0;
+  let n = 0, known = 0, water = 0, fuel = 0, runoff = 0;
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x1; x++) {
       const k = (y * m.width + x) * 4;
@@ -189,7 +189,6 @@ function sampleLandCover(m: Mosaic, b: Bounds, i: number, j: number, w: number, 
       n++;
       if (!c) continue;
       known++;
-      if (c[3] === 0.12) residential++;
       fuel += c[3];
       runoff += c[4];
       if (c[3] === 0) water++;
@@ -200,7 +199,6 @@ function sampleLandCover(m: Mosaic, b: Bounds, i: number, j: number, w: number, 
     runoff: known ? runoff / known : UNMAPPED_RUNOFF,
     mapped: n ? known / n : 0,
     water: n ? water / n : 0,
-    residential: n ? residential / n : 0,
   };
 }
 
@@ -228,7 +226,6 @@ export async function loadTerrain(name: string, center: LngLat): Promise<Terrain
   const elev = new Float32Array(w * h);
   const fuel = new Float32Array(w * h);
   const sea = new Uint8Array(w * h);
-  const residential = osm ? new Uint8Array(w * h) : undefined;
   const water = new Uint8Array(w * h);
   const runoff = new Float32Array(w * h).fill(UNMAPPED_RUNOFF);
   let minElev = Infinity;
@@ -240,13 +237,14 @@ export async function loadTerrain(name: string, center: LngLat): Promise<Terrain
       const z = dem ? sampleElevation(dem, lon, lat) : syntheticElevation(i, j, w);
       elev[k] = z;
       sea[k] = dem && z <= 0.5 ? 1 : 0;
+      const lc = osm ? sampleLandCover(osm, bounds, i, j, w, h) : null;
+      if (lc) {
+        water[k] = lc.water >= WATER_BREAK ? 1 : 0;
+      }
       const guess = img ? sampleFuel(img, lon, lat) : 0.75;
       if (sea[k]) fuel[k] = 0;
-      else if (osm) {
+      else if (lc) {
         // mapped land cover where OSM has it, the imagery guess for the rest
-        const lc = sampleLandCover(osm, bounds, i, j, w, h);
-        if (residential && lc.residential >= 0.15 && lc.water < WATER_BREAK) residential[k] = 1;
-        water[k] = lc.water >= WATER_BREAK ? 1 : 0;
         fuel[k] = water[k] ? 0 : lc.fuel * lc.mapped + guess * (1 - lc.mapped);
         runoff[k] = lc.runoff * lc.mapped + UNMAPPED_RUNOFF * (1 - lc.mapped);
       } else fuel[k] = guess;
@@ -265,7 +263,6 @@ export async function loadTerrain(name: string, center: LngLat): Promise<Terrain
     elev,
     fuel,
     sea,
-    residential,
     water,
     runoff,
     demSource: dem ? "terrarium" : "synthetic",

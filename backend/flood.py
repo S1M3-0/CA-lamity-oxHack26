@@ -25,6 +25,7 @@ import heapq
 import math
 
 import numpy as np
+from api.weather import hourly_rain_total
 
 # Cell cover codes sent by the frontend.
 LAND, WATER, SEA = 0, 1, 2
@@ -148,6 +149,7 @@ def simulate(
     saturation: float,
     num_frames: int = 96,
     minutes_per_frame: float = 15.0,
+    hourly_rainfall: list[float] | None = None,
 ) -> tuple[np.ndarray, list[float]]:
     """Run a flood and return (frames, flooded km² per frame).
 
@@ -206,8 +208,10 @@ def simulate(
         hour = (step - 0.5) * dt_h
 
         # 4. Rain, and how much of it runs off as the soil wets up.
-        rate_m = rain_rate(hour, rainfall_mm_h, storm_hours) / 1000 * dt_h
-        sat = min(1.0, saturation + (1 - saturation) * rain_total(hour, rainfall_mm_h, storm_hours) / SOIL_WETS_UP_MM)
+        rate = (hourly_rainfall[min(int(hour), 23)] if hour < 24 else 0.0) if hourly_rainfall is not None else rain_rate(hour, rainfall_mm_h, storm_hours)
+        total = hourly_rain_total(hour, hourly_rainfall) if hourly_rainfall is not None else rain_total(hour, rainfall_mm_h, storm_hours)
+        rate_m = rate / 1000 * dt_h
+        sat = min(1.0, saturation + (1 - saturation) * total / SOIL_WETS_UP_MM)
         c_eff = c_dry + (1 - c_dry) * sat * sat
         h += np.where(sea, 0.0, rate_m * c_eff)
 

@@ -18,6 +18,7 @@ router = APIRouter(prefix="/flood", tags=["flood"])
 
 
 class FloodRequest(BaseModel):
+    hourly_rainfall: list[float] | None = Field(default=None, min_length=24, max_length=24)
     w: int = Field(ge=2, le=512)
     h: int = Field(ge=2, le=512)
     cell_m: float = Field(gt=0)
@@ -49,6 +50,8 @@ def simulate_flood(data: FloodRequest):
     runoff = _grid("runoff", data.runoff, np.uint8, shape) / 255.0
     if not np.isfinite(elevation).all():
         raise HTTPException(422, "elevation has missing values")
+    if data.hourly_rainfall is not None and any(not np.isfinite(r) or r < 0 or r > 500 for r in data.hourly_rainfall):
+        raise HTTPException(422, "hourly_rainfall must contain finite rates between 0 and 500 mm/h")
 
     frames, areas = flood.simulate(
         elevation, cover, runoff, data.cell_m,
@@ -57,6 +60,7 @@ def simulate_flood(data: FloodRequest):
         saturation=data.saturation / 100,
         num_frames=data.num_frames,
         minutes_per_frame=data.minutes_per_frame,
+        hourly_rainfall=data.hourly_rainfall,
     )
     return {
         "w": data.w,

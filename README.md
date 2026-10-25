@@ -2,7 +2,7 @@
 
 See the [architecture diagram](docs/architecture.md).
 
-Our OxHack 2026 project. **TerraShift** (the app) simulates wildfires, floods and hurricanes on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. For wildfire and flood runs, it also shows the nearest evacuation centres that stay safe as the disaster spreads.
+Our OxHack 2026 project. **TerraShift** (the app) simulates wildfires and floods on real places using cellular automata. Pick a location and a disaster, set the conditions, and watch it unfold over 24 hours. For wildfire and flood runs, it also shows the nearest evacuation centres that stay safe as the disaster spreads.
 
 Repo: https://github.com/S1M3-0/CA-lamity-oxHack26
 
@@ -18,7 +18,6 @@ Repo: https://github.com/S1M3-0/CA-lamity-oxHack26
 - **Statistics.** After a run, the Statistics panel shows totals and an hourly chart:
   - **Fire:** area burned, fastest and average spread, and peak burning area.
   - **Flood:** total rainfall, peak flooded area and deep-water area.
-- **Hurricane.** Set wind speed and direction, then click the map to place the storm. Browser simulations show storm bands, a calm eye and estimated residential warnings; these runs stay in the current session.
 - **Saved scenarios.** Wildfire and flood runs are saved to Tiger Data (TimescaleDB + PostGIS), so your scenarios and last settings come back after a refresh. Press **Clear simulation** before starting a new one.
 - **Map.** Switch between satellite and street basemaps, or turn on 3D terrain.
 
@@ -94,16 +93,17 @@ The rasters are too big for git. Put them in `backend/data/maps/`:
 
 Without them, wildfires inside LA fall back to the in-browser model. Floods don't need them.
 
-## Hurricane simulation
+## Yesterday's weather
 
-Select **Hurricane**, set the wind speed and direction, click the map to set the storm origin, then press **Generate simulation**. The browser runs a cellular automaton with Life-inspired neighbour birth and death rules: storm cells form patchy rotating bands around a calm eye, break apart, then dissipate late in the run. The storm travels downwind (following the arrow; the direction slider says where wind comes **from**) with a repeatable deviation bounded by ±15°.
+Under **Environmental conditions → Weather source**, select **Yesterday’s weather at this location**. The app fetches yesterday's modelled hourly wind speed, wind direction, relative humidity and liquid rainfall from [Open-Meteo](https://open-meteo.com/en/docs), using the selected place's coordinates and local timezone. No API key is needed for the public API.
 
-Size and movement are illustrative and scaled to the 12 km map: storm travel uses 1% of the selected wind speed, and its radius grows before shrinking and fading over the 24-hour timeline. Cells also disappear as the storm leaves the simulated area. Purple shading shows relative storm intensity.
+The simulation starts at local 00:00. Wildfire uses each hour's wind and humidity; floods use each hour's rain instead of the manual storm shape. Rain and showers are combined, with preceding-hour totals aligned to the correct simulation interval. Snowfall is excluded. Soil saturation remains a manual starting condition. Imported weather is modelled data, not station observations; choosing it does not detect whether a real disaster occurred.
 
-Warning signs group estimated residential cells into kilometre-sized areas wherever the simulated storm reaches them. Amber means arrival is ahead; red means the area is currently affected. Hover or focus a sign for details. Signs clear once the last forecast cells pass, and follow the timeline when rewinding. Residential estimates use the existing OSM tile colour sampling; if those tiles fail to load, warnings are hidden and the map reports that residential data is unavailable.
+The timeline shows the date, timezone and hourly conditions. UTC timestamps are converted to the place's timezone to identify yesterday correctly across daylight-saving changes. On a 25-hour day, repeated clock hours are combined; on a 23-hour day, the skipped hour carries nearby wind and humidity with zero rain. The UI explains this normalization to the 24-hour timeline, and the day's rain total is preserved. Changing location reloads weather. If the provider fails or returns missing hours, generation waits until you retry or choose manual conditions. Selecting manual restores the adjustable sliders.
 
-Run `npm run test:hurricane --workspace frontend` for the model checks.
+Saved wildfire and flood runs include their weather profile in the existing JSON parameters, so replay uses the original hourly data without fetching a different day or changing the database schema. Loading a saved scenario labels its original weather date explicitly.
 
+The backend endpoint is `GET /api/weather/yesterday?latitude=51.745&longitude=-1.255`. Run `npm run test:weather --workspace frontend` for the browser weather tests and, from `backend/` with its virtual environment active, `python -m unittest discover -s tests -v` for the backend checks.
 
 ## Deploying
 

@@ -9,6 +9,7 @@ import base64
 import numpy as np
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from api.weather import WeatherHour
 
 import CA
 from fire_maps import LA_BOUNDS, load_fire_maps
@@ -19,6 +20,7 @@ FRAME_CODES = np.array([0, 255, 110], dtype=np.uint8)  # indexed by CA state
 
 
 class Weather(BaseModel):
+    hourly_weather: list[WeatherHour] | None = Field(default=None, min_length=24, max_length=24)
     wind_direction: float = Field(ge=0, lt=360, description="Degrees the wind blows from")
     wind_speed_kmh: float = Field(ge=0, le=200)
     humidity: float = Field(ge=0, le=100, description="Relative humidity, %")
@@ -57,6 +59,7 @@ def _run(data: Weather, area_map, ignition, **grids) -> np.ndarray:
         num_frames=data.num_frames,
         steps_per_frame=data.steps_per_frame,
         seed=data.seed,
+        hourly_weather=[h.model_dump() for h in data.hourly_weather] if data.hourly_weather else None,
         **grids,
     )
 

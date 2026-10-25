@@ -1,4 +1,5 @@
 import { mulberry32 } from "./rng";
+import { conditionsAtHour } from "./weather";
 import { FRAME_COUNT, FRAMES_PER_HOUR, type Params, type SimResult, type Terrain } from "./types";
 
 const DIRS8 = [
@@ -45,14 +46,7 @@ export function simulateWildfire(t: Terrain, p: Params, origin: number, seed: nu
   const state = new Uint8Array(N); // 0 unburnt, 1 burning, 2 burnt
   const burnLeft = new Uint16Array(N);
   const arrival = new Float32Array(N).fill(Infinity);
-  const V = p.windSpeed / 3.6;
-  const windTo = (((p.windDir + 180) % 360) * Math.PI) / 180;
-  const hum = Math.pow(Math.max(0, 1 - p.humidity / 90), 1.3);
   const P0 = 0.035;
-  const pw = DIRS8.map(([dx, dy]) => {
-    const bearing = Math.atan2(dx, -dy);
-    return Math.exp(0.08 * V) * Math.exp(0.131 * V * (Math.cos(bearing - windTo) - 1));
-  });
   const dist = DIRS8.map(([dx, dy]) => Math.hypot(dx, dy));
 
   let active: number[] = [];
@@ -77,6 +71,14 @@ export function simulateWildfire(t: Terrain, p: Params, origin: number, seed: nu
   };
   const frames = [snapshot()];
   for (let fi = 1; fi < FRAME_COUNT; fi++) {
+    const weather = conditionsAtHour(p, (fi - 1) / FRAMES_PER_HOUR);
+    const V = weather.windSpeed / 3.6;
+    const windTo = (((weather.windDir + 180) % 360) * Math.PI) / 180;
+    const hum = Math.pow(Math.max(0, 1 - weather.humidity / 90), 1.3);
+    const pw = DIRS8.map(([dx, dy]) => {
+      const bearing = Math.atan2(dx, -dy);
+      return Math.exp(0.08 * V) * Math.exp(0.131 * V * (Math.cos(bearing - windTo) - 1));
+    });
     for (let s = 0; s < STEPS_PER_FRAME && active.length; s++) {
       const time = (fi - 1 + (s + 1) / STEPS_PER_FRAME) / FRAMES_PER_HOUR;
       const current = active;
@@ -136,7 +138,7 @@ export function simulateFlood(t: Terrain, p: Params): SimResult {
     for (let s = 0; s < STEPS_PER_FRAME; s++) {
       const tH = (fi - 1) / FRAMES_PER_HOUR + s * dtH;
       const infil = 25 * (1 - sat) * Math.exp(-tH / 4);
-      const rain = tH < p.stormHours ? p.rainfall : 0;
+      const rain = conditionsAtHour(p, tH).rainfall;
       const runoff = (Math.max(0, rain - infil) / 1000) * dtH;
       for (let k = 0; k < N; k++) if (!sea[k]) depth[k] += runoff;
 

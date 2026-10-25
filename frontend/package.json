@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "test:hurricane": "tsc --module commonjs --moduleResolution node --target ES2017 --esModuleInterop --skipLibCheck --outDir .next/hurricane-tests src/lib/sim/hurricane.test.ts src/lib/sim/residential-warnings.test.ts && node --test .next/hurricane-tests/hurricane.test.js .next/hurricane-tests/residential-warnings.test.js"
+    "test:weather": "tsc --module commonjs --moduleResolution node --target ES2017 --esModuleInterop --skipLibCheck --outDir .next/weather-tests src/lib/sim/weather.test.ts && node --test .next/weather-tests/weather.test.js"
   },
   "dependencies": {
     "maplibre-gl": "^5.24.0",

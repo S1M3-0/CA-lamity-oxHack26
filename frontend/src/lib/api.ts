@@ -5,7 +5,7 @@
  */
 
 import type { GeoJSONSourceSpecification } from "maplibre-gl";
-import type { Bounds, Hazard } from "@/lib/sim/types";
+import type { Bounds, Hazard, Params, WeatherDay, WeatherHour } from "@/lib/sim/types";
 
 export type MapGeoJSON = Exclude<GeoJSONSourceSpecification["data"], string>;
 
@@ -23,6 +23,7 @@ export type LaFireRequest = {
   num_frames?: number;
   steps_per_frame?: number;
   seed?: number;
+  hourly_weather?: WeatherHour[];
 };
 
 export type FireResult = {
@@ -54,6 +55,7 @@ export type FloodRequest = {
   saturation: number;
   num_frames?: number;
   minutes_per_frame?: number;
+  hourly_rainfall?: number[];
 };
 
 /** Frames use 0 dry, 1..39 water inside a river channel, 40..255 flood depth. */
@@ -63,11 +65,11 @@ export type FloodResult = Omit<FireResult, "bounds">;
 export type SavedRun = {
   id: number;
   created_at: string;
-  hazard: Exclude<Hazard, "hurricane">;
+  hazard: Hazard;
   place_name: string;
   /** [lon, lat] */
   center: [number, number];
-  params: Record<string, number>;
+  params: Params;
   origin: [number, number] | null;
   seed: number;
   source: "backend" | "browser";
@@ -145,6 +147,10 @@ export async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  weather: {
+    yesterday: (latitude: number, longitude: number, signal?: AbortSignal) =>
+      request<WeatherDay>(`/weather/yesterday?latitude=${latitude}&longitude=${longitude}`, { signal }),
+  },
   health: () => request<{ status: string; database: string }>("/health"),
   aoi: {
     la: (signal?: AbortSignal) => request<MapGeoJSON>("/aoi/la", { signal }),

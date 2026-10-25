@@ -13,6 +13,7 @@ from rasterio.transform import from_bounds
 
 import flood
 from api import tiger
+from api.weather import WeatherDay, hourly_rain_total
 
 router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -34,7 +35,7 @@ class RunCreate(BaseModel):
     hazard: Hazard
     place_name: str = Field(min_length=1, max_length=100)
     center: tuple[float, float] = Field(description="[lon, lat]")
-    params: dict[str, float]
+    params: dict[str, float | WeatherDay]
     origin: tuple[float, float] | None = Field(default=None, description="[lon, lat] ignition point")
     seed: int = Field(ge=0)
     source: Literal["backend", "browser"]
@@ -54,7 +55,7 @@ class SavedRun(BaseModel):
     hazard: Hazard
     place_name: str
     center: tuple[float, float]
-    params: dict[str, float]
+    params: dict[str, float | WeatherDay]
     origin: tuple[float, float] | None
     seed: int
     source: str
@@ -89,9 +90,15 @@ class RunStats(BaseModel):
     summary: dict[str, float]
 
 
-def _storm_hours(params: dict[str, float]) -> float:
+def _storm_hours(params: dict) -> float:
     # Runs saved before storms had a duration rained for the whole day.
     return params.get("stormHours", 24.0)
+
+
+def _rain_total(params: dict, hour: float) -> float:
+    if params.get("weather"):
+        return hourly_rain_total(hour, [h["rainfall"] for h in params["weather"]["hours"]])
+    return flood.rain_total(hour, params.get("rainfall", 0.0), _storm_hours(params))
 
 
 def _tiger(fn, *args):
@@ -156,17 +163,16 @@ def create_run(data: RunCreate):
             "tol": tolerance,
         })
 
-    rain = data.params.get("rainfall", 0.0) if data.hazard == "flood" else 0.0
-    storm = _storm_hours(data.params)
+    params = data.model_dump(mode="json")["params"]
     stats = [
         {"hour": i / data.frames_per_hour, "area_km2": area, "active_km2": active,
-         "rain_mm": flood.rain_total(i / data.frames_per_hour, rain, storm)}
+         "rain_mm": _rain_total(params, i / data.frames_per_hour) if data.hazard == "flood" else 0.0}
         for i, (area, active) in enumerate(zip(data.area_km2, data.active_km2))
     ]
 
     run = {
         "hazard": data.hazard, "place_name": data.place_name,
-        "center_lon": data.center[0], "center_lat": data.center[1], "params": data.params,
+        "center_lon": data.center[0], "center_lat": data.center[1], "params": params,
         "origin_lon": data.origin[0] if data.origin else None, "origin_lat": data.origin[1] if data.origin else None,
         "seed": data.seed, "source": data.source,
         "west": b.west, "south": b.south, "east": b.east, "north": b.north,
@@ -234,7 +240,8 @@ def get_stats(run_id: int):
         else:
             summary |= {
                 "total_rain_mm": final.rain_mm,
-                "rain_rate_mm_h": run["params"].get("rainfall", 0.0),
-                "storm_hours": _storm_hours(run["params"]),
+                "rain_rate_mm_h": final.rain_mm / 24 if run["params"].get("weather") else run["params"].get("rainfall", 0.0),
+                "storm_hours": 24 if run["params"].get("weather") else _storm_hours(run["params"]),
+                "hourly_weather": float(bool(run["params"].get("weather"))),
             }
     return RunStats(hazard=run["hazard"], hourly=hourly, summary=summary)

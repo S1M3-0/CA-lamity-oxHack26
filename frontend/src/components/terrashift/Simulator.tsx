@@ -10,7 +10,6 @@ import {
   HOURS,
   PARAM_META,
   backendCoversFire,
-  buildResidentialWarnings,
   compass,
   describeParams,
   loadTerrain,
@@ -19,14 +18,15 @@ import {
   runBackendWildfire,
   runSeed,
   runSimulation,
-  residentialAlertsAtFrame,
   terrainKey,
   type Hazard,
   type LngLat,
   type Params,
   type SimResult,
   type Terrain,
+  type WeatherDay,
 } from "@/lib/sim";
+import { conditionsAtHour, weatherRainTotal } from "@/lib/sim/weather";
 import { APP_NAME, APP_TAGLINE } from "@/lib/config";
 import { Icon, type IconName } from "./Icon";
 import { InfoTip } from "./InfoTip";
@@ -66,7 +66,7 @@ const PRESETS: Place[] = [
   { name: "Topanga, LA", center: [-118.6, 34.1] },
 ];
 
-const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop", hurricane: "hurricane" };
+const HAZARD_ICON: Record<Hazard, IconName> = { wildfire: "flame", flood: "drop" };
 const RUN_COLORS = ["#f97316", "#38bdf8", "#a3e635", "#e879f9", "#facc15", "#f87171"];
 const SPEEDS = [0.5, 1, 2, 4];
 const MAX_RUNS = 6;
@@ -108,6 +108,11 @@ export function Simulator() {
   const [terrainError, setTerrainError] = useState<string | null>(null);
   const [hazard, setHazard] = useState<Hazard>("wildfire");
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
+  const [weatherMode, setWeatherMode] = useState<"manual" | "yesterday" | "saved">("manual");
+  const [weather, setWeather] = useState<WeatherDay | null>(null);
+  const [weatherLoading, setWeatherLoading] = useState(false);
+  const [weatherError, setWeatherError] = useState<string | null>(null);
+  const [weatherReload, setWeatherReload] = useState(0);
   const [origin, setOrigin] = useState<LngLat | null>(null);
   const [runs, setRuns] = useState<Run[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -126,6 +131,11 @@ export function Simulator() {
 
   const key = terrainKey(place.center);
   const terrain = terrains[key] ?? null;
+  const weatherMatchesPlace = weather?.latitude === place.center[1] && weather?.longitude === place.center[0];
+  const weatherReady = weatherMode === "manual" || (weatherMatchesPlace && !weatherLoading && !weatherError);
+  const simulationParams: Params = weatherMode !== "manual" && weatherMatchesPlace && weather
+    ? { ...params, weather }
+    : params;
   const activeRun = runs.find((r) => r.id === activeId) ?? null;
   const viewRun = activeRun && activeRun.key === key ? activeRun : null;
   const viewSim = viewRun?.sim ?? null;
@@ -138,14 +148,19 @@ export function Simulator() {
   const meta = HAZARDS[hazard];
   const missingOrigin = meta.originLabel !== null && origin === null;
   const useBackend = hazard === "flood" || (hazard === "wildfire" && terrain !== null && backendCoversFire(terrain));
-  const residentialWarnings = useMemo(
-    () => viewRun?.hazard === "hurricane" && viewSim ? buildResidentialWarnings(viewSim.grid, viewSim.result) : [],
-    [viewRun, viewSim],
-  );
-  const residentialAlerts = useMemo(
-    () => residentialAlertsAtFrame(residentialWarnings, frameIdx),
-    [residentialWarnings, frameIdx],
-  );
+
+  useEffect(() => {
+    if (weatherMode !== "yesterday") return;
+    const controller = new AbortController();
+    setWeather(null);
+    setWeatherLoading(true);
+    setWeatherError(null);
+    api.weather.yesterday(place.center[1], place.center[0], controller.signal)
+      .then((day) => { if (!controller.signal.aborted) setWeather(day); })
+      .catch((e) => { if (!controller.signal.aborted) setWeatherError(errorText(e)); })
+      .finally(() => { if (!controller.signal.aborted) setWeatherLoading(false); });
+    return () => controller.abort();
+  }, [weatherMode, place.center[0], place.center[1], weatherReload]);
 
   useEffect(() => {
     if (terrains[key]) return;
@@ -215,7 +230,7 @@ export function Simulator() {
     setRuns((old) => old.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   async function simulateRun(h: Hazard, tr: Terrain, p: Params, o: LngLat | null, seed: number, wantBackend: boolean) {
-    if (wantBackend && h !== "hurricane") {
+    if (wantBackend) {
       try {
         const sim = h === "flood" ? await runBackendFlood(tr, p) : await runBackendWildfire(tr, p, o, seed);
         return { sim, source: "backend" as const };
@@ -224,15 +239,11 @@ export function Simulator() {
         setSimNote(`${model} unavailable (${errorText(e)}), so this run used the simpler in-browser model.`);
       }
     }
-    return { sim: { result: runSimulation(h, tr, p, o), grid: tr }, source: "browser" as const };
+    return { sim: { result: runSimulation(h, tr, p, o, seed), grid: tr }, source: "browser" as const };
   }
 
   /** Store the run in Tiger Data, then read back its statistics and safe points. */
   async function save(run: Run, sim: Sim) {
-    if (run.hazard === "hurricane") {
-      updateRun(run.id, { note: "Hurricane runs stay in this session; saved scenarios currently support wildfire and flood." });
-      return;
-    }
     try {
       const saved = await api.runs.create(
         buildRunCreate(
@@ -262,13 +273,15 @@ export function Simulator() {
 
   function changePlace(p: Place) {
     if (terrainKey(p.center) !== key) setOrigin(null);
+    if (weatherMode === "saved") setWeatherMode("yesterday");
+    touched.current = true;
     setPlace(p);
   }
 
   function generate() {
-    if (!terrain || missingOrigin) return;
+    if (!terrain || missingOrigin || !weatherReady) return;
     const o = meta.originLabel ? origin : null;
-    const seed = runSeed(hazard, terrain, params, o);
+    const seed = runSeed(hazard, terrain, simulationParams, o);
     const existing = runs.find((r) => r.seed === seed && r.key === key);
     if (existing) {
       // same conditions → same (reproducible) simulation; just replay it
@@ -282,9 +295,9 @@ export function Simulator() {
     setPlaying(false);
     setSimNote(null);
     setTimeout(async () => {
-      const { sim, source } = await simulateRun(hazard, terrain, params, o, seed, useBackend);
+      const { sim, source } = await simulateRun(hazard, terrain, simulationParams, o, seed, useBackend);
       const run: Run = {
-        id: nextId.current++, dbId: null, seed, hazard, place, key, params, origin: o, source, sim,
+        id: nextId.current++, dbId: null, seed, hazard, place, key, params: simulationParams, origin: o, source, sim,
         safePoints: null, stats: null, note: null,
       };
       setRuns((old) => [run, ...old].slice(0, MAX_RUNS));
@@ -318,7 +331,12 @@ export function Simulator() {
 
   function loadSettings(r: Run) {
     setHazard(r.hazard);
-    setParams(r.params);
+    const { weather: savedWeather, ...manualParams } = r.params;
+    setParams(manualParams);
+    setWeather(savedWeather ?? null);
+    setWeatherMode(savedWeather ? "saved" : "manual");
+    setWeatherLoading(false);
+    setWeatherError(null);
     setPlace(r.place);
     setOrigin(r.origin);
   }
@@ -336,6 +354,8 @@ export function Simulator() {
 
   const area = viewSim ? viewSim.result.area[frameIdx] : 0;
   const runStatus = viewRun ? viewRun.note ?? (viewRun.dbId === null ? "Saving to Tiger Data…" : null) : null;
+  const shownWeather = viewRun ? viewRun.params.weather : (weatherMode !== "manual" && weatherMatchesPlace ? weather : null);
+  const shownConditions = conditionsAtHour(shownWeather ? { ...params, weather: shownWeather } : params, viewRun ? t : 0);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 lg:flex">
@@ -408,13 +428,6 @@ export function Simulator() {
                   <span><b className="text-zinc-100">Humidity:</b> damper air slows the fire. Above about 80% it barely spreads.</span>
                   <span>Fires also spread faster uphill.</span>
                 </>
-              ) : hazard === "hurricane" ? (
-                <>
-                  <span><b className="text-zinc-100">Wind speed:</b> controls how fast the storm travels. Travel is scaled to 1% of this speed for the local map.</span>
-                  <span><b className="text-zinc-100">Wind direction:</b> where the wind comes from. The storm follows the arrow with a deviation of up to 15° either side.</span>
-                  <span>The storm starts small, grows around a calm eye, then breaks up and dissipates. Neighbouring cells can form or die, creating patchy bands.</span>
-                  <span>Warning signs mark estimated residential areas in this simulated path: amber ahead of arrival, red while affected. They clear once the forecast storm cells pass.</span>
-                </>
               ) : (
                 <>
                   <span><b className="text-zinc-100">Rainfall:</b> average intensity of the storm. It builds to a peak, then eases off. Paved ground sheds most of it; forest soaks more up.</span>
@@ -425,8 +438,46 @@ export function Simulator() {
               )}
             </InfoTip>
           </h2>
+          <label className="flex flex-col gap-1.5 text-sm">
+            <span className="font-medium">Weather source</span>
+            <select
+              value={weatherMode}
+              onChange={(e) => {
+                touched.current = true;
+                setWeatherMode(e.target.value as "manual" | "yesterday" | "saved");
+                setWeatherError(null);
+                setWeatherLoading(false);
+              }}
+              className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-zinc-100"
+            >
+              <option value="manual">Manual conditions</option>
+              <option value="yesterday">Yesterday’s weather at this location</option>
+              {weatherMode === "saved" && <option value="saved">Loaded scenario’s hourly weather</option>}
+            </select>
+          </label>
+          {weatherMode !== "manual" && (
+            <div className="flex flex-col gap-2 rounded-lg border border-sky-900 bg-sky-950/30 p-3 text-xs text-sky-100" aria-live="polite">
+              {weatherLoading || (!weather && !weatherError) ? <p>Loading yesterday’s hourly weather for {place.name}…</p> : weatherError ? (
+                <>
+                  <p role="alert">{weatherError}</p>
+                  <button type="button" className={btn} onClick={() => setWeatherReload((n) => n + 1)}>Retry weather</button>
+                </>
+              ) : weather && weatherMatchesPlace ? (
+                <>
+                  <p className="font-medium">{weather.date} · {weather.timezone} · 00:00–24:00</p>
+                  <p>Wind and humidity change hourly. Floods use each hour’s liquid rainfall. Soil saturation stays manual.</p>
+                  <p>{weatherRainTotal({ ...params, weather }, 24).toFixed(1)} mm rain over the day</p>
+                  {weather.dayHours && weather.dayHours !== 24 && (
+                    <p>This local day had {weather.dayHours} hours. The 24-hour timeline combines repeated hours or fills a skipped hour, preserving the day’s rain total.</p>
+                  )}
+                  <a className="underline" href="https://open-meteo.com/" target="_blank" rel="noreferrer">Modelled weather by Open-Meteo</a>
+                </>
+              ) : null}
+            </div>
+          )}
           {meta.params.map((k) => {
             const pm = PARAM_META[k];
+            if (weatherMode !== "manual" && k !== "saturation") return null;
             return (
               <label key={k} className="flex flex-col gap-1.5">
                 <span className="flex items-center justify-between text-sm">
@@ -463,8 +514,7 @@ export function Simulator() {
                     {meta.originLabel}
                     <InfoTip label={meta.originLabel}>
                       <span>
-                        Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where
-                        {hazard === "hurricane" ? "the storm starts" : "the fire starts"}</b>, {hazard === "hurricane" ? "then it grows and travels with the wind." : "and it spreads outward from there."}
+                        Required. Click the map to place it. <b className="text-zinc-100">That point is exactly where the fire starts</b>, and it spreads outward from there.
                       </span>
                       <span>Click somewhere else to move it, or press × to clear it.</span>
                     </InfoTip>
@@ -472,7 +522,7 @@ export function Simulator() {
                   <span className={`block text-xs ${origin ? "text-zinc-500" : "text-amber-400"}`}>
                     {origin
                       ? `Starts at ${origin[1].toFixed(4)}, ${origin[0].toFixed(4)}`
-                      : `Required · click the map where the ${hazard === "hurricane" ? "storm" : "fire"} starts`}
+                      : "Required · click the map where the fire starts"}
                   </span>
                 </span>
               </span>
@@ -502,12 +552,14 @@ export function Simulator() {
           ) : (
             <button
               onClick={generate}
-              disabled={!terrain || computing || missingOrigin}
+              disabled={!terrain || computing || missingOrigin || !weatherReady}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand px-4 py-2.5 font-medium text-white hover:bg-brand-hover disabled:opacity-50"
             >
               <Icon name="play" />
               {computing
                 ? "Simulating 24 hours…"
+                : !weatherReady
+                  ? weatherError ? "Weather unavailable · retry or use manual" : "Loading weather…"
                 : missingOrigin
                   ? `Set the ${meta.originLabel?.toLowerCase()} first`
                   : "Generate simulation"}
@@ -590,9 +642,8 @@ export function Simulator() {
             center={place.center}
             showLaAoi={place.name === "Los Angeles"}
             terrain={viewSim?.grid ?? terrain}
-            hazard={viewSim ? viewRun!.hazard : null}
+            hazard={viewSim ? viewRun!.hazard : hazard}
             frame={viewSim?.result.frames[frameIdx] ?? null}
-            residentialAlerts={residentialAlerts}
             origin={meta.originLabel ? (viewRun ? viewRun.origin : origin) : null}
             safePoints={viewSim ? hourSafePoints : []}
             basemap={basemap}
@@ -616,16 +667,17 @@ export function Simulator() {
             </div>
           )}
           {viewSim && <Legend hazard={viewRun!.hazard} safePoints={hourSafePoints.length > 0} />}
-          {viewRun?.hazard === "hurricane" && viewSim && (
-            <div className="pointer-events-none absolute left-3 top-12 z-10 max-w-xs rounded-lg bg-zinc-950/85 px-3 py-2 text-xs text-amber-200 backdrop-blur" role="status">
-              {viewSim.grid.residential
-                ? `${residentialAlerts.length} residential areas in the remaining simulated path · estimated from OSM`
-                : "Residential map unavailable · warning signs are hidden"}
-            </div>
-          )}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3">
+          {shownWeather && (
+            <p className="text-xs text-sky-200" aria-live="polite">
+              {shownWeather.date} · {shownWeather.timezone} · {String(Math.floor(viewRun ? t : 0)).padStart(2, "0")}:{String(Math.round(((viewRun ? t : 0) % 1) * 60)).padStart(2, "0")}
+              {" · "}{shownConditions.windSpeed.toFixed(1)} km/h {compass(shownConditions.windDir)} wind
+              {" · "}{shownConditions.humidity.toFixed(0)}% humidity
+              {" · "}{shownConditions.rainfall.toFixed(1)} mm/h rain
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-2">
             <button className={btn} onClick={() => { setPlaying(false); setT(0); }} disabled={!viewRun} aria-label="Rewind to start">
               <Icon name="rewind" />
@@ -651,7 +703,7 @@ export function Simulator() {
             >
               <Icon name="fast" /> {speed}h/s
             </button>
-            {viewRun && viewRun.hazard !== "hurricane" && (
+            {viewRun && (
               <StatsPanel
                 hazard={viewRun.hazard}
                 title={`Run ${viewRun.id} · ${HAZARDS[viewRun.hazard].label} statistics`}
@@ -700,8 +752,6 @@ function Legend({ hazard, safePoints }: { hazard: Hazard; safePoints: boolean })
   const items =
     hazard === "wildfire"
       ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
-      : hazard === "hurricane"
-      ? [["#784beb", "Outer storm bands"], ["#dccdff", "Intense storm cells"], ["#27272a", "Calm eye (clear)"], ["#fbbf24", "⚠ Residential area ahead"], ["#f87171", "⚠ Residential area affected"]]
       : [["#2dd4bf", "River (within its banks)"], ["#5abeff", "Flood, shallow (0.15 m+)"], ["#0a46d7", "Flood, deep (2.5 m+)"]];
   return (
     <div className="pointer-events-none absolute bottom-8 right-3 z-10 flex flex-col gap-1 rounded-lg bg-zinc-950/80 px-3 py-2 text-xs text-zinc-200 backdrop-blur">

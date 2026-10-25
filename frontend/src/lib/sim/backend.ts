@@ -60,6 +60,7 @@ export async function runBackendFlood(t: Terrain, p: Params): Promise<{ result: 
     saturation: p.saturation,
     num_frames: FRAME_COUNT - 1,
     minutes_per_frame: 60 / FRAMES_PER_HOUR,
+    hourly_rainfall: p.weather?.hours.map((h) => h.rainfall),
   });
   const frames = res.frames.map(decodeFrame);
   return { result: { frames, arrival: arrivalTimes(frames, FLOOD_MIN), area: res.area }, grid: t };
@@ -87,6 +88,7 @@ export async function runBackendWildfire(
     num_frames: FRAME_COUNT - 1,
     steps_per_frame: STEPS_PER_FRAME,
     seed,
+    hourly_weather: p.weather?.hours,
   });
   const frames = res.frames.map(decodeFrame);
   return {
