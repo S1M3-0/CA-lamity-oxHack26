@@ -9,7 +9,9 @@ import {
   PARAM_META,
   compass,
   describeParams,
+  loadStations,
   loadTerrain,
+  regionBounds,
   runSeed,
   runSimulation,
   terrainKey,
@@ -17,12 +19,18 @@ import {
   type LngLat,
   type Params,
   type SimResult,
+  type Station,
   type Terrain,
 } from "@/lib/sim";
-import { APP_NAME, APP_TAGLINE } from "@/lib/config";
+import { APP_NAME, APP_TAGLINE, GOOGLE_MAPS_API_KEY } from "@/lib/config";
+import { DispatchRadio } from "./DispatchRadio";
+import { GoogleSimMap } from "./GoogleSimMap";
 import { Icon, type IconName } from "./Icon";
 import { InfoTip } from "./InfoTip";
-import { SimMap, type Basemap } from "./SimMap";
+import { CREW_CLASS, STATION_CLASS, SimMap, type Basemap } from "./SimMap";
+
+// Google Maps when a key is configured, otherwise MapLibre + Esri imagery.
+const MapView = GOOGLE_MAPS_API_KEY ? GoogleSimMap : SimMap;
 
 type Place = { name: string; center: LngLat };
 
@@ -34,6 +42,7 @@ type Run = {
   terrain: Terrain;
   params: Params;
   origin: LngLat | null;
+  stations: Station[];
   result: SimResult;
 };
 
@@ -63,6 +72,8 @@ export function Simulator() {
   const [place, setPlace] = useState<Place>(PRESETS[0]);
   const [terrains, setTerrains] = useState<Record<string, Terrain>>({});
   const [terrainError, setTerrainError] = useState<string | null>(null);
+  // Fire stations per terrain key; null = OpenStreetMap lookup failed.
+  const [stationsByKey, setStationsByKey] = useState<Record<string, Station[] | null>>({});
   const [hazard, setHazard] = useState<Hazard>("wildfire");
   const [params, setParams] = useState<Params>(DEFAULT_PARAMS);
   const [origin, setOrigin] = useState<LngLat | null>(null);
@@ -78,6 +89,7 @@ export function Simulator() {
 
   const key = terrainKey(place.center);
   const terrain = terrains[key] ?? null;
+  const stations = stationsByKey[key] ?? [];
   const activeRun = runs.find((r) => r.id === activeId) ?? null;
   const viewRun = activeRun && activeRun.terrain.key === key ? activeRun : null;
   const frameIdx = Math.round(t * FRAMES_PER_HOUR);
@@ -97,11 +109,23 @@ export function Simulator() {
   }, [key, place, terrains]);
 
   useEffect(() => {
+    if (key in stationsByKey) return;
+    let cancelled = false;
+    loadStations(key, regionBounds(place.center))
+      .then((found) => !cancelled && setStationsByKey((old) => ({ ...old, [key]: found })))
+      .catch(() => !cancelled && setStationsByKey((old) => ({ ...old, [key]: null })));
+    return () => {
+      cancelled = true;
+    };
+  }, [key, place, stationsByKey]);
+
+  useEffect(() => {
     if (!playing) return;
     let raf = 0;
     let last = performance.now();
     const tick = (now: number) => {
-      const dt = (now - last) / 1000;
+      // rAF timestamps can predate `last` after a long task (e.g. a simulation run); never go backwards.
+      const dt = Math.max(0, now - last) / 1000;
       last = now;
       setT((prev) => Math.min(HOURS, prev + dt * speed));
       raf = requestAnimationFrame(tick);
@@ -122,7 +146,7 @@ export function Simulator() {
   function generate() {
     if (!terrain || missingOrigin) return;
     const o = meta.originLabel ? origin : null;
-    const seed = runSeed(hazard, terrain, params, o);
+    const seed = runSeed(hazard, terrain, params, o, stations);
     const existing = runs.find((r) => r.seed === seed);
     if (existing) {
       // same conditions → same (reproducible) simulation; just replay it
@@ -134,8 +158,8 @@ export function Simulator() {
     setComputing(true);
     setPlaying(false);
     setTimeout(() => {
-      const result = runSimulation(hazard, terrain, params, o);
-      const run: Run = { id: nextId.current++, seed, hazard, place, terrain, params, origin: o, result };
+      const result = runSimulation(hazard, terrain, params, o, stations);
+      const run: Run = { id: nextId.current++, seed, hazard, place, terrain, params, origin: o, stations, result };
       setRuns((old) => [run, ...old].slice(0, MAX_RUNS));
       setActiveId(run.id);
       setT(0);
@@ -204,6 +228,9 @@ export function Simulator() {
                   )}–${Math.round(terrain.maxElev)} m`
                 : "Loading elevation and imagery…"}
             {terrain?.demSource === "synthetic" && " · elevation tiles unavailable, using synthetic terrain"}
+            {stationsByKey[key] === null
+              ? " · fire stations unavailable, crews arrive from outside the area"
+              : key in stationsByKey && ` · ${stations.length} fire station${stations.length === 1 ? "" : "s"}`}
           </p>
         </section>
 
@@ -238,6 +265,7 @@ export function Simulator() {
                   <span><b className="text-zinc-100">Wind direction:</b> where the wind comes from. The fire spreads the other way (follow the arrow).</span>
                   <span><b className="text-zinc-100">Humidity:</b> damper air slows the fire. Above about 80% it barely spreads.</span>
                   <span>Fires also spread faster uphill.</span>
+                  <span><b className="text-zinc-100">Fire crews sent:</b> engines leave the real fire stations nearest the fire once it is reported, an hour after it starts. They put out flames they can reach and soak the ground around them, and drive back to their station to refill when the tank runs dry. More crews hold more of the fire line. Set to 0 to let it burn.</span>
                 </>
               ) : (
                 <>
@@ -401,13 +429,15 @@ export function Simulator() {
         </div>
 
         <div className="relative h-[60vh] lg:h-auto lg:flex-1">
-          <SimMap
+          <MapView
             center={place.center}
             showLaAoi={place.name === "Los Angeles"}
             terrain={terrain}
             hazard={viewRun?.hazard ?? null}
             frame={viewRun?.result.frames[frameIdx] ?? null}
             origin={meta.originLabel ? (viewRun ? viewRun.origin : origin) : null}
+            stations={stations}
+            crews={viewRun?.result.crews?.[frameIdx] ?? null}
             basemap={basemap}
             terrain3d={terrain3d}
             onMapClick={(ll) => meta.originLabel && setOrigin(ll)}
@@ -418,10 +448,11 @@ export function Simulator() {
               Running cellular automaton…
             </div>
           )}
-          {viewRun && <Legend hazard={viewRun.hazard} />}
+          {(viewRun || stations.length > 0) && <Legend hazard={viewRun?.hazard ?? null} crews={!!viewRun?.result.crews} stations={stations.length > 0} />}
         </div>
 
         <div className="flex flex-col gap-2 border-t border-zinc-800 px-4 py-3">
+          {viewRun && <DispatchRadio key={viewRun.id} runId={viewRun.id} input={{ ...viewRun, placeName: viewRun.place.name }} />}
           <div className="flex flex-wrap items-center gap-2">
             <button className={btn} onClick={() => { setPlaying(false); setT(0); }} disabled={!viewRun} aria-label="Rewind to start">
               <Icon name="rewind" />
@@ -481,16 +512,21 @@ export function Simulator() {
   );
 }
 
-function Legend({ hazard }: { hazard: Hazard }) {
-  const items =
+function Legend({ hazard, crews, stations }: { hazard: Hazard | null; crews: boolean; stations: boolean }) {
+  const swatch = "size-3 rounded-sm";
+  const items: [string, string, string?][] =
     hazard === "wildfire"
-      ? [["#ff9a14", "Burning"], ["#37120c", "Burnt"]]
-      : [["#5abeff", "Shallow (0.15 m+)"], ["#0a46d7", "Deep (2.5 m+)"]];
+      ? [[swatch, "Burning", "#ff9a14"], [swatch, "Burnt", "#37120c"]]
+      : hazard === "flood"
+        ? [[swatch, "Shallow (0.15 m+)", "#5abeff"], [swatch, "Deep (2.5 m+)", "#0a46d7"]]
+        : [];
+  if (crews) items.push([swatch, "Put out by crews", "#22d3ee"], [CREW_CLASS, "Fire crew"]);
+  if (stations) items.push([STATION_CLASS, "Fire station · © OpenStreetMap"]);
   return (
     <div className="pointer-events-none absolute bottom-8 right-3 z-10 flex flex-col gap-1 rounded-lg bg-zinc-950/80 px-3 py-2 text-xs text-zinc-200 backdrop-blur">
-      {items.map(([c, l]) => (
+      {items.map(([cls, l, c]) => (
         <span key={l} className="flex items-center gap-2">
-          <span className="size-3 rounded-sm" style={{ background: c }} />
+          <span className={`${cls} shrink-0`} style={c ? { background: c } : undefined} />
           {l}
         </span>
       ))}

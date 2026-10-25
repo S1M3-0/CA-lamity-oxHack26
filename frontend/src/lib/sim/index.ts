@@ -1,10 +1,11 @@
 import { simulateFlood, simulateWildfire } from "./models";
 import { hashString } from "./rng";
 import { lngLatToCell } from "./terrain";
-import { type Hazard, type LngLat, type Params, type SimResult, type Terrain } from "./types";
+import { type Hazard, type LngLat, type Params, type SimResult, type Station, type Terrain } from "./types";
 
 export * from "./types";
-export { loadTerrain, lngLatToCell, cellToLngLat, terrainKey } from "./terrain";
+export { loadTerrain, lngLatToCell, cellToLngLat, regionBounds, terrainKey } from "./terrain";
+export { loadStations } from "./stations";
 
 export type ParamKey = keyof Params;
 
@@ -14,9 +15,9 @@ export const HAZARDS: Record<
 > = {
   wildfire: {
     label: "Wildfire",
-    params: ["windSpeed", "windDir", "humidity"],
+    params: ["windSpeed", "windDir", "humidity", "crews"],
     originLabel: "Ignition point",
-    blurb: "Spread driven by wind, humidity, slope and fuel estimated from imagery.",
+    blurb: "Spread driven by wind, humidity, slope and fuel estimated from imagery. Fire crews leave real fire stations to fight it.",
   },
   flood: {
     label: "Flood",
@@ -35,6 +36,7 @@ export const PARAM_META: Record<
   humidity: { label: "Relative humidity", min: 0, max: 100, step: 5, unit: "%" },
   rainfall: { label: "Rainfall intensity", min: 0, max: 100, step: 5, unit: "mm/h" },
   saturation: { label: "Soil saturation", min: 0, max: 100, step: 5, unit: "%" },
+  crews: { label: "Fire crews sent", min: 0, max: 12, step: 1, unit: "" },
 };
 
 export const DEFAULT_PARAMS: Params = {
@@ -43,6 +45,7 @@ export const DEFAULT_PARAMS: Params = {
   humidity: 30,
   rainfall: 50,
   saturation: 40,
+  crews: 4,
 };
 
 export function compass(deg: number) {
@@ -51,12 +54,12 @@ export function compass(deg: number) {
 
 export function describeParams(hazard: Hazard, p: Params) {
   if (hazard === "wildfire")
-    return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ${p.humidity}% RH`;
+    return `${p.windSpeed} km/h ${compass(p.windDir)} wind · ${p.humidity}% RH · ${p.crews ? `${p.crews} crews` : "no crews"}`;
   return `${p.rainfall} mm/h rain · ${p.saturation}% soil`;
 }
 
-export function runSeed(hazard: Hazard, t: Terrain, p: Params, origin: LngLat | null) {
-  return hashString(JSON.stringify([hazard, t.key, p, origin]));
+export function runSeed(hazard: Hazard, t: Terrain, p: Params, origin: LngLat | null, stations: Station[] = []) {
+  return hashString(JSON.stringify([hazard, t.key, p, origin, stations.length]));
 }
 
 export function runSimulation(
@@ -64,12 +67,13 @@ export function runSimulation(
   t: Terrain,
   p: Params,
   origin: LngLat | null,
+  stations: Station[] = [],
 ): SimResult {
-  const seed = runSeed(hazard, t, p, origin);
+  const seed = runSeed(hazard, t, p, origin, stations);
   const originCell = origin ? lngLatToCell(t, origin) : -1;
   if (hazard === "wildfire") {
     const start = originCell >= 0 ? originCell : (t.h >> 1) * t.w + (t.w >> 1);
-    return simulateWildfire(t, p, start, seed);
+    return simulateWildfire(t, p, start, seed, stations.map((s) => s.lngLat));
   }
   return simulateFlood(t, p, originCell >= 0 ? originCell : null);
 }
@@ -94,6 +98,7 @@ export function renderFrame(
       const o = k * 4;
       if (hazard === "wildfire") {
         if (v === 255) { px[o] = 255; px[o + 1] = 120 + ((k * 7) % 60); px[o + 2] = 20; px[o + 3] = 240; }
+        else if (v === 60) { px[o] = 34; px[o + 1] = 211; px[o + 2] = 238; px[o + 3] = 190; }
         else { px[o] = 55; px[o + 1] = 18; px[o + 2] = 12; px[o + 3] = 175; }
       } else {
         const a = (v - 40) / 215;

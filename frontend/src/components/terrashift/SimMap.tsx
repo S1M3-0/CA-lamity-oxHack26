@@ -4,16 +4,19 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import type { Map as MLMap, Marker, ImageSource, GeoJSONSource, StyleSpecification } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { api, type MapGeoJSON } from "@/lib/api";
-import { renderFrame, type Hazard, type LngLat, type Terrain } from "@/lib/sim";
+import { renderFrame, type Hazard, type LngLat, type Station, type Terrain } from "@/lib/sim";
 
 export type Basemap = "satellite" | "streets";
-type Props = {
+export type SimMapProps = {
   center: LngLat;
   showLaAoi: boolean;
   terrain: Terrain | null;
   hazard: Hazard | null;
   frame: Uint8Array | null;
   origin: LngLat | null;
+  stations: Station[];
+  /** fire crew positions in the current frame */
+  crews: LngLat[] | null;
   basemap: Basemap;
   terrain3d: boolean;
   onMapClick?: (lngLat: LngLat) => void;
@@ -81,6 +84,9 @@ function corners(t: Terrain): [[number, number], [number, number], [number, numb
   return [[west, north], [east, north], [east, south], [west, south]];
 }
 
+export const STATION_CLASS = "size-3.5 rounded-sm border-2 border-white bg-red-600 shadow";
+export const CREW_CLASS = "size-3 rounded-full border-2 border-zinc-900 bg-yellow-300 shadow";
+
 function markerEl(className: string, text?: string) {
   const el = document.createElement("div");
   el.className = className;
@@ -88,12 +94,14 @@ function markerEl(className: string, text?: string) {
   return el;
 }
 
-export function SimMap(props: Props) {
+export function SimMap(props: SimMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
   const loadedRef = useRef(false);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const markersRef = useRef<Marker[]>([]);
+  const stationMarkersRef = useRef<Marker[]>([]);
+  const crewMarkersRef = useRef<Marker[]>([]);
   const fittedKeyRef = useRef<string | null>(null);
   const propsRef = useRef(props);
   propsRef.current = props;
@@ -130,13 +138,6 @@ export function SimMap(props: Props) {
         });
         map.addSource("sim", { type: "image", url: EMPTY_PNG, coordinates: [[0, 1], [1, 1], [1, 0], [0, 0]] });
         map.addLayer({ id: "sim", type: "raster", source: "sim", paint: { "raster-fade-duration": 0, "raster-resampling": "nearest" } });
-        map.addSource("bounds", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
-        map.addLayer({
-          id: "bounds",
-          type: "line",
-          source: "bounds",
-          paint: { "line-color": "#fafafa", "line-width": 1.5, "line-dasharray": [3, 2], "line-opacity": 0.8 },
-        });
         map.addLayer({
           id: "la-aoi-outline",
           type: "line",
@@ -165,22 +166,14 @@ export function SimMap(props: Props) {
     const { terrain, hazard, frame } = propsRef.current;
     if (!map || !loadedRef.current) return;
     const src = map.getSource("sim") as ImageSource | undefined;
-    const bounds = map.getSource("bounds") as GeoJSONSource | undefined;
-    if (!src || !bounds) return;
+    if (!src) return;
     if (!terrain) {
       src.updateImage({ url: EMPTY_PNG });
-      bounds.setData({ type: "FeatureCollection", features: [] });
       return;
     }
     canvasRef.current ??= document.createElement("canvas");
     renderFrame(canvasRef.current, terrain, hazard, frame);
     src.updateImage({ url: canvasRef.current.toDataURL(), coordinates: corners(terrain) });
-    const c = corners(terrain);
-    bounds.setData({
-      type: "Feature",
-      properties: {},
-      geometry: { type: "LineString", coordinates: [...c, c[0]] },
-    });
   }
 
   function applyCamera() {
@@ -214,6 +207,30 @@ export function SimMap(props: Props) {
     }
   }
 
+  function applyStations() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib) return;
+    stationMarkersRef.current.forEach((m) => m.remove());
+    stationMarkersRef.current = propsRef.current.stations.map((s) => {
+      const el = markerEl(STATION_CLASS);
+      el.title = s.name;
+      return new lib.Marker({ element: el }).setLngLat(s.lngLat).addTo(map);
+    });
+  }
+
+  function applyCrews() {
+    const map = mapRef.current;
+    const lib = libRef.current;
+    if (!map || !lib) return;
+    const crews = propsRef.current.crews ?? [];
+    while (crewMarkersRef.current.length > crews.length) crewMarkersRef.current.pop()?.remove();
+    crews.forEach((pos, c) => {
+      crewMarkersRef.current[c] ??= new lib.Marker({ element: markerEl(CREW_CLASS) }).setLngLat(pos).addTo(map);
+      crewMarkersRef.current[c].setLngLat(pos);
+    });
+  }
+
   function applyStyleToggles() {
     const map = mapRef.current;
     if (!map || !loadedRef.current) return;
@@ -237,6 +254,8 @@ export function SimMap(props: Props) {
     applyOverlay();
     applyAoi();
     applyMarkers();
+    applyStations();
+    applyCrews();
     applyStyleToggles();
   }
 
@@ -276,11 +295,17 @@ export function SimMap(props: Props) {
   useEffect(applyOverlay, [props.terrain, props.hazard, props.frame]);
   useEffect(applyCamera, [props.terrain, props.center]);
   useEffect(applyMarkers, [props.origin, props.hazard]);
+  useEffect(applyStations, [props.stations]);
+  useEffect(applyCrews, [props.crews]);
   useEffect(applyStyleToggles, [props.basemap, props.terrain3d]);
 
   return (
     <div className="relative h-full min-h-[280px] w-full overflow-hidden">
-      <div ref={containerRef} className="absolute inset-0" />
+      {/* maplibre-gl.css sets position: relative on the map element, which beats Tailwind's layered
+          `absolute`, so the stretching lives on a wrapper and the map fills it. */}
+      <div className="absolute inset-0">
+        <div ref={containerRef} className="h-full w-full" />
+      </div>
       {props.showLaAoi && aoiStatus && (
         <div className="pointer-events-none absolute bottom-3 left-3 z-10 max-w-[min(32rem,calc(100%-1.5rem))] rounded-lg bg-zinc-950/85 px-3 py-1.5 text-xs text-zinc-100 shadow backdrop-blur" role="status">
           {aoiStatus === "ready" ? "LA AOI · loaded from API" : aoiStatus === "loading" ? "Loading LA AOI…" : `LA AOI: ${aoiError}`}

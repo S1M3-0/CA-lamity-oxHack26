@@ -36,11 +36,16 @@ export type Params = {
   rainfall: number;
   /** % */
   saturation: number;
+  /** fire crews dispatched (0 = no firefighting) */
+  crews: number;
 };
+
+/** A real fire station from OpenStreetMap. */
+export type Station = { name: string; lngLat: LngLat };
 
 /**
  * Per-frame cell values (0 = unaffected). Meaning per hazard:
- *  wildfire: 255 burning, 110 burnt
+ *  wildfire: 255 burning, 110 burnt, 60 put out by crews
  *  flood: 40..255 scaled water depth
  */
 export type SimResult = {
@@ -49,6 +54,8 @@ export type SimResult = {
   arrival: Float32Array;
   /** km² affected per frame */
   area: number[];
+  /** wildfire only: where each fire crew is in each frame */
+  crews?: LngLat[][];
 };
 
 export const HOURS = 24;
